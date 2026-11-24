@@ -1,13 +1,6 @@
 
 const SUPABASE_URL = "https://kvwoyeusveepyjewrzpi.supabase.co";
-
 const SUPABASE_KEY = "sb_publishable__kSVXsmw0d-erIP9doLa3g_J29aYfiv";
-
-// ======================================
-// KALIM SOCIAL - MAIN APPLICATION
-// ======================================
-
-
 
 const db = window.supabase.createClient(
   SUPABASE_URL,
@@ -16,6 +9,10 @@ const db = window.supabase.createClient(
 
 const $ = (id) => document.getElementById(id);
 let currentUser = null;
+
+// ======================================
+// COMMON FUNCTIONS
+// ======================================
 
 function showMessage(text) {
   $("message").textContent = text || "";
@@ -206,18 +203,27 @@ $("post-form").addEventListener("submit", async (e) => {
 });
 
 // ======================================
-// LOAD POSTS
+// PROFILE
 // ======================================
 
 async function getProfile(userId) {
-  const { data } = await db
+  const { data, error } = await db
     .from("profiles")
     .select("*")
     .eq("id", userId)
     .maybeSingle();
 
+  if (error) {
+    console.error(error);
+    return null;
+  }
+
   return data;
 }
+
+// ======================================
+// LOAD POSTS + REAL AND DEMO LIKES
+// ======================================
 
 async function loadFeed(targetUserId = null, targetContainer = "feed") {
   const container = $(targetContainer);
@@ -251,6 +257,7 @@ async function loadFeed(targetUserId = null, targetContainer = "feed") {
     heading.append(avatar(profile?.avatar_url));
 
     const identity = make("div");
+
     identity.append(
       make("h3", profile?.full_name || profile?.username || "User"),
       make("p", "@" + (profile?.username || "user"), "muted")
@@ -271,40 +278,81 @@ async function loadFeed(targetUserId = null, targetContainer = "feed") {
       card.append(img);
     }
 
-    card.append(make("p", new Date(post.created_at).toLocaleString(), "muted"));
+    card.append(
+      make("p", new Date(post.created_at).toLocaleString(), "muted")
+    );
 
-    const { data: likes } = await db
+    // REAL LIKES
+    const { data: likes, error: likesError } = await db
       .from("likes")
       .select("user_id")
       .eq("post_id", post.id);
 
-    const liked = likes?.some(like => like.user_id === currentUser.id);
+    if (likesError) {
+      showMessage(likesError.message);
+      continue;
+    }
+
+    // DEMO LIKES
+    const { data: demo, error: demoError } = await db
+      .from("demo_likes")
+      .select("likes_count")
+      .eq("post_id", post.id)
+      .maybeSingle();
+
+    if (demoError) {
+      console.error("Demo likes error:", demoError.message);
+    }
+
+    const realLikes = likes?.length || 0;
+    const demoLikes = demo?.likes_count || 0;
+    const totalLikes = realLikes + demoLikes;
+
+    const liked = likes?.some(
+      like => like.user_id === currentUser.id
+    );
+
     const likeButton = makeButton(
-      `${liked ? "❤️ Unlike" : "🤍 Like"} (${likes?.length || 0})`,
+      `${liked ? "❤️ Unlike" : "🤍 Like"} (${totalLikes})`,
       async () => toggleLike(post.id, liked)
     );
 
     card.append(likeButton);
 
-    const { data: comments } = await db
+    if (demoLikes > 0) {
+      card.append(
+        make("p", `${demoLikes} demo likes · ${realLikes} real likes`, "muted")
+      );
+    }
+
+    // COMMENTS
+    const { data: comments, error: commentsError } = await db
       .from("comments")
       .select("*")
       .eq("post_id", post.id)
       .order("created_at", { ascending: true });
 
+    if (commentsError) {
+      showMessage(commentsError.message);
+      continue;
+    }
+
     const commentArea = make("div");
 
     for (const comment of comments || []) {
       const commentProfile = await getProfile(comment.user_id);
+
       const item = make(
         "p",
         `${commentProfile?.username || "User"}: ${comment.content}`,
         "comment"
       );
+
       commentArea.append(item);
     }
 
     const commentForm = make("form", undefined, "comment-form");
+
     const commentInput = document.createElement("input");
     commentInput.placeholder = "Write a comment...";
     commentInput.maxLength = 1000;
@@ -338,6 +386,7 @@ async function loadFeed(targetUserId = null, targetContainer = "feed") {
         () => openProfile(post.user_id),
         "secondary"
       );
+
       card.append(followButton);
     }
 
@@ -381,6 +430,7 @@ async function loadMyProfile() {
 
   const row = make("div", undefined, "profile-row");
   row.append(avatar(profile.avatar_url));
+
   row.append(make("div",
     `${profile.full_name || ""} @${profile.username || ""}\n${profile.bio || ""}`
   ));
@@ -429,6 +479,7 @@ $("profile-form").addEventListener("submit", async (e) => {
     showMessage("Profile updated!");
     $("avatar-file").value = "";
     await loadMyProfile();
+
   } catch (error) {
     showMessage(error.message);
   }
@@ -447,6 +498,7 @@ $("search-input").addEventListener("keydown", (e) => {
 async function searchUsers() {
   const term = $("search-input").value.trim();
   const results = $("search-results");
+
   results.replaceChildren();
 
   if (term.length < 2) {
@@ -472,12 +524,18 @@ async function searchUsers() {
     if (profile.id === currentUser.id) continue;
 
     const row = make("div", undefined, "result-item");
+
     row.append(avatar(profile.avatar_url));
+
     row.append(make("span",
       `${profile.full_name || "User"} (@${profile.username})`
     ));
 
-    row.append(makeButton("View", () => openProfile(profile.id)));
+    row.append(makeButton(
+      "View",
+      () => openProfile(profile.id)
+    ));
+
     results.append(row);
   }
 }
@@ -490,16 +548,22 @@ async function openProfile(userId) {
   showView("other-profile");
 
   const profile = await getProfile(userId);
-  if (!profile) return showMessage("Profile not found.");
+
+  if (!profile) {
+    return showMessage("Profile not found.");
+  }
 
   const area = $("other-profile");
   area.replaceChildren();
 
   const row = make("div", undefined, "profile-row");
+
   row.append(avatar(profile.avatar_url));
+
   row.append(make("div",
     `${profile.full_name || "User"}\n@${profile.username}\n${profile.bio || ""}`
   ));
+
   area.append(row);
 
   const { data: existing } = await db
@@ -532,7 +596,9 @@ async function openProfile(userId) {
     }
   );
 
-  if (userId !== currentUser.id) area.append(followButton);
+  if (userId !== currentUser.id) {
+    area.append(followButton);
+  }
 
   const { count: followers } = await db
     .from("follows")
@@ -544,7 +610,9 @@ async function openProfile(userId) {
     .select("*", { count: "exact", head: true })
     .eq("follower_id", userId);
 
-  area.append(make("p", `Followers: ${followers || 0} | Following: ${following || 0}`));
+  area.append(make("p",
+    `Followers: ${followers || 0} | Following: ${following || 0}`
+  ));
 
   await loadFeed(userId, "other-posts");
 }
@@ -593,7 +661,10 @@ async function loadNotifications() {
     }
 
     if (notification.actor_id) {
-      row.append(makeButton("View Profile", () => openProfile(notification.actor_id)));
+      row.append(makeButton(
+        "View Profile",
+        () => openProfile(notification.actor_id)
+      ));
     }
 
     list.append(row);
