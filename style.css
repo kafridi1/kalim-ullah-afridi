@@ -1,0 +1,200 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --bg: #080d18;
+  --card: #101a2d;
+  --blue: #3985ff;
+  --text: #f4f7ff;
+  --muted: #a5b1c7;
+  --border: rgba(255,255,255,.1);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, sans-serif;
+  line-height: 1.7;
+}
+
+a { color: inherit; text-decoration: none; }
+
+.navbar {
+  min-height: 75px;
+  padding: 15px 8%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(8,13,24,.94);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(12px);
+}
+
+.logo { font-size: 28px; font-weight: 800; }
+.logo span, .hero h1 span, .section-title span { color: var(--blue); }
+
+.navbar nav {
+  display: flex;
+  gap: 25px;
+  flex-wrap: wrap;
+}
+
+.navbar nav a, .admin-link {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.navbar nav a:hover, .admin-link:hover { color: var(--blue); }
+
+.admin-link {
+  border: 1px solid var(--blue);
+  border-radius: 8px;
+  padding: 7px 14px;
+}
+
+.hero {
+  min-height: 650px;
+  padding: 90px 10%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 50px;
+  background:
+    radial-gradient(circle at 80% 40%, rgba(57,133,255,.16), transparent 35%);
+}
+
+.hero-content { max-width: 650px; }
+.eyebrow { color: var(--blue); font-size: 12px; font-weight: 800; letter-spacing: 3px; }
+
+.hero h1 {
+  font-size: clamp(38px, 6vw, 66px);
+  line-height: 1.15;
+  margin: 18px 0;
+}
+
+.hero h2 { font-size: 23px; color: #d3ddf0; }
+.hero-description { color: var(--muted); margin: 20px 0 30px; }
+
+.hero-image {
+  width: 300px;
+  height: 300px;
+  flex-shrink: 0;
+  border: 3px solid var(--blue);
+  border-radius: 50%;
+  padding: 8px;
+  box-shadow: 0 0 50px rgba(57,133,255,.2);
+}
+
+.hero-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.btn {
+  display: inline-block;
+  padding: 12px 22px;
+  border-radius: 8px;
+  border: 1px solid var(--blue);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  transition: .25s;
+}
+
+.primary { background: var(--blue); color: white; }
+.secondary { color: white; }
+.btn:hover { transform: translateY(-3px); filter: brightness(1.15); }
+.hero-buttons { display: flex; gap: 12px; flex-wrap: wrap; }
+
+.section {
+  padding: 90px 10%;
+  text-align: center;
+}
+
+.section-title { font-size: 38px; margin: 10px 0 35px; }
+.about-text { max-width: 750px; margin: auto; color: var(--muted); }
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 22px;
+  text-align: left;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  overflow: hidden;
+  transition: .25s;
+}
+
+.card:hover {
+  transform: translateY(-6px);
+  border-color: var(--blue);
+}
+
+.card img {
+  width: 100%;
+  height: 190px;
+  object-fit: cover;
+  display: block;
+}
+
+.card-content { padding: 22px; }
+.card h3 { margin-bottom: 8px; }
+.card p { color: var(--muted); font-size: 14px; }
+.card .date { color: var(--blue); font-size: 12px; margin-bottom: 8px; }
+
+.contact > p:not(.eyebrow) { color: var(--muted); }
+
+form {
+  max-width: 550px;
+  margin: 30px auto 20px;
+  display: grid;
+  gap: 14px;
+}
+
+input, textarea {
+  width: 100%;
+  padding: 14px;
+  color: white;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+}
+
+textarea { min-height: 130px; resize: vertical; }
+input:focus, textarea:focus { outline: 1px solid var(--blue); }
+.whatsapp { color: #54d98c; display: inline-block; margin-top: 10px; }
+
+footer {
+  padding: 30px 10%;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media(max-width: 800px) {
+  .navbar { flex-wrap: wrap; }
+  .navbar nav { order: 3; width: 100%; justify-content: center; gap: 15px; }
+  .hero { flex-direction: column-reverse; text-align: center; padding: 65px 7%; }
+  .hero-image { width: 220px; height: 220px; }
+  .hero-buttons { justify-content: center; }
+  .section { padding: 65px 7%; }
+}
