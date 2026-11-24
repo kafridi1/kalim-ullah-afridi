@@ -1,6 +1,6 @@
 
 const SUPABASE_URL = "https://kvwoyeusveepyjewrzpi.supabase.co";
-const SUPABASE_KEY = "PASTE_YOUR_SUPABASE_PUBLISHABLE_KEY_HERE";
+const SUPABASE_KEY = "sb_publishable__kSVXsmw0d-erIP9doLa3g_J29aYfiv";
 const STORAGE_BUCKET = "social-images";
 
 const $ = (selector, root = document) => root.querySelector(selector);
