@@ -1,134 +1,365 @@
 
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#6757ff">
-  <meta name="description" content="Kalim Social — share moments, videos and ideas.">
-  <title>Kalim Social</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#ffffff">
+  <title>Kalim Social — Community</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
+
 <body>
-<header class="topbar">
-  <a class="brand" href="#" aria-label="Kalim Social home"><span class="brand-mark">K</span><span>Kalim<span class="brand-light">Social</span></span></a>
-  <label class="top-search"><i class="fa-solid fa-magnifying-glass"></i><input id="global-search" type="search" placeholder="Search people"></label>
-  <div class="top-actions"><span id="header-user" class="header-user"></span><button id="header-login" class="btn primary">Login</button></div>
-</header>
 
-<main class="shell">
-  <p id="message" class="message" role="status" aria-live="polite"></p>
+  <!-- HEADER -->
+  <header class="topbar">
+    <a href="#" class="brand">
+      <span class="brand-logo">K</span>
+      <span>Kalim <b>Social</b></span>
+    </a>
 
-  <section id="auth-section" class="auth-layout">
-    <div class="hero">
-      <span class="eyebrow">YOUR WORLD. YOUR PEOPLE.</span>
-      <h1>Share your world.<br><span>Find your people.</span></h1>
-      <p>Photos, videos and conversations — all in one place.</p>
-      <div class="hero-points"><span><i class="fa-solid fa-video"></i> Share videos</span><span><i class="fa-solid fa-users"></i> Build community</span><span><i class="fa-solid fa-shield-halved"></i> Privacy controls</span></div>
+    <div class="header-search">
+      <span>⌕</span>
+      <input id="global-search" type="search" placeholder="Search people and posts...">
     </div>
-    <div class="auth-card card">
-      <div class="auth-tabs"><button class="auth-tab active" data-auth-tab="login">Login</button><button class="auth-tab" data-auth-tab="signup">Create account</button></div>
-      <form id="login-form" class="auth-form">
-        <h2>Welcome back</h2><p class="muted">Login to continue to Kalim Social.</p>
-        <label for="login-email">Email</label><input id="login-email" type="email" autocomplete="email" required placeholder="you@example.com">
-        <label for="login-password">Password</label><input id="login-password" type="password" autocomplete="current-password" required placeholder="Your password">
-        <button class="btn primary wide" type="submit">Login <i class="fa-solid fa-arrow-right"></i></button>
-      </form>
-      <form id="signup-form" class="auth-form" hidden>
-        <h2>Join Kalim Social</h2><p class="muted">Create your account to get started.</p>
-        <label for="signup-name">Full name</label><input id="signup-name" maxlength="60" required placeholder="Your name">
-        <label for="signup-email">Email</label><input id="signup-email" type="email" autocomplete="email" required placeholder="you@example.com">
-        <label for="signup-password">Password</label><input id="signup-password" type="password" minlength="6" autocomplete="new-password" required placeholder="At least 6 characters">
-        <button class="btn primary wide" type="submit">Create account <i class="fa-solid fa-arrow-right"></i></button>
-        <p class="tiny muted">You may need to verify your email before logging in.</p>
-      </form>
-    </div>
-  </section>
 
-  <section id="home-section" class="app-layout" hidden>
-    <aside class="sidebar card">
-      <div class="side-label">YOUR SPACE</div>
-      <button class="nav-link active" data-tab="feed"><i class="fa-solid fa-house"></i> Home feed</button>
-      <button class="nav-link" data-tab="videos"><i class="fa-solid fa-play"></i> Videos</button>
-      <button class="nav-link" data-tab="profile"><i class="fa-regular fa-user"></i> My profile</button>
-      <button class="nav-link" data-tab="search"><i class="fa-solid fa-compass"></i> Discover</button>
-      <button class="nav-link" data-tab="notifications"><i class="fa-regular fa-bell"></i> Notifications</button>
-      <button class="nav-link" data-tab="settings"><i class="fa-solid fa-gear"></i> Settings</button>
-      <div class="side-bottom"><button id="logout-button" class="nav-link logout"><i class="fa-solid fa-arrow-right-from-bracket"></i> Log out</button><small>Kalim Social · Connect with care</small></div>
+    <div class="header-actions">
+      <button class="icon-btn" data-tab="notifications" title="Notifications">♧</button>
+      <button class="icon-btn" data-tab="messages" title="Messages">✉</button>
+      <button class="icon-btn" data-tab="settings" title="Settings">⚙</button>
+      <div id="header-user" class="header-user">Guest</div>
+      <button id="header-login" class="primary-btn">Login</button>
+    </div>
+  </header>
+
+  <!-- AUTHENTICATION -->
+  <main id="auth-section" class="auth-section">
+    <section class="auth-card">
+      <div class="auth-brand">
+        <span class="brand-logo">K</span>
+        <h1>Welcome to Kalim Social</h1>
+        <p>Connect, share and discover your community.</p>
+      </div>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-auth-tab="login">Login</button>
+        <button class="auth-tab" data-auth-tab="signup">Create account</button>
+      </div>
+
+      <form id="login-form">
+        <label for="login-email">Email address</label>
+        <input id="login-email" type="email" required autocomplete="email"
+          placeholder="you@example.com">
+
+        <label for="login-password">Password</label>
+        <input id="login-password" type="password" required
+          autocomplete="current-password" placeholder="Your password">
+
+        <button class="primary-btn full-btn" type="submit">Login</button>
+      </form>
+
+      <form id="signup-form" hidden>
+        <label for="signup-name">Full name</label>
+        <input id="signup-name" type="text" required maxlength="80"
+          placeholder="Your name">
+
+        <label for="signup-email">Email address</label>
+        <input id="signup-email" type="email" required autocomplete="email"
+          placeholder="you@example.com">
+
+        <label for="signup-password">Password</label>
+        <input id="signup-password" type="password" required minlength="8"
+          autocomplete="new-password" placeholder="At least 8 characters">
+
+        <button class="primary-btn full-btn" type="submit">Create account</button>
+      </form>
+
+      <p id="message" class="message" role="status"></p>
+    </section>
+  </main>
+
+  <!-- MAIN APP -->
+  <main id="home-section" class="app-layout" hidden>
+
+    <!-- LEFT NAVIGATION -->
+    <aside class="left-sidebar">
+      <div class="sidebar-profile">
+        <div id="sidebar-avatar" class="avatar avatar-placeholder">K</div>
+        <div>
+          <strong id="sidebar-name">Your profile</strong>
+          <small id="sidebar-username">@member</small>
+        </div>
+      </div>
+
+      <nav class="main-nav">
+        <button class="side-link active" data-tab="feed">
+          <span>⌂</span> Activity Feed
+        </button>
+        <button class="side-link" data-tab="profile">
+          <span>♙</span> My Profile
+        </button>
+        <button class="side-link" data-tab="search">
+          <span>⌕</span> Discover People
+        </button>
+        <button class="side-link" data-tab="notifications">
+          <span>♧</span> Notifications
+        </button>
+        <button class="side-link" data-tab="messages">
+          <span>✉</span> Messages
+        </button>
+        <button class="side-link" data-tab="settings">
+          <span>⚙</span> Settings
+        </button>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <button id="logout-button" class="side-link">
+          <span>⇥</span> Logout
+        </button>
+      </div>
     </aside>
 
-    <div class="main-column">
+    <!-- CENTER CONTENT -->
+    <section class="main-content">
+
+      <!-- FEED -->
       <section id="feed-view" class="view">
-        <div class="page-title"><div><span class="eyebrow">YOUR COMMUNITY</span><h1>Home feed</h1><p class="muted">See what people are sharing.</p></div><span class="title-icon"><i class="fa-solid fa-earth-americas"></i></span></div>
-        <form id="post-form" class="card composer">
-          <div class="composer-row"><div id="composer-avatar" class="avatar placeholder">K</div><textarea id="post-content" maxlength="2000" placeholder="What's happening in your world?"></textarea></div>
-          <div class="composer-footer"><label class="upload-choice" for="post-media"><i class="fa-regular fa-images"></i> Photo or video</label><input id="post-media" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime"><span id="media-name" class="muted tiny"></span><button class="btn primary" type="submit"><i class="fa-solid fa-paper-plane"></i> Publish</button></div>
-          <p class="tiny muted">Images up to 5 MB · Videos up to 50 MB</p>
-        </form>
-        <div class="section-row"><h2>Latest posts</h2><span class="live-tag"><i></i> Community</span></div>
-        <div id="feed" class="post-list"><div class="empty">Loading feed…</div></div>
+        <div class="page-heading">
+          <div>
+            <h1>Activity Feed</h1>
+            <p>See what's happening in your community.</p>
+          </div>
+          <button id="refresh-feed" class="secondary-btn">↻ Refresh</button>
+        </div>
+
+        <!-- POST COMPOSER -->
+        <section class="card composer">
+          <div class="composer-top">
+            <div id="composer-avatar" class="avatar avatar-placeholder">K</div>
+            <textarea id="post-content" maxlength="5000"
+              placeholder="Share what's on your mind..."></textarea>
+          </div>
+
+          <div id="media-preview" class="media-preview" hidden></div>
+
+          <div class="composer-bottom">
+            <label class="media-select">
+              <span>▧</span> Photo or video
+              <input id="post-media" type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm">
+            </label>
+
+            <span id="upload-status" class="upload-status"></span>
+            <button id="publish-post" class="primary-btn" type="button">
+              Publish
+            </button>
+          </div>
+
+          <div id="upload-progress-wrap" class="progress-wrap" hidden>
+            <div class="progress-track">
+              <div id="upload-progress" class="progress-fill"></div>
+            </div>
+            <span id="upload-progress-text">0%</span>
+          </div>
+        </section>
+
+        <!-- FEED FILTERS -->
+        <div class="feed-toolbar">
+          <div class="feed-tabs">
+            <button class="feed-filter active" data-feed-filter="all">All updates</button>
+            <button class="feed-filter" data-feed-filter="following">Following</button>
+            <button class="feed-filter" data-feed-filter="media">Photos & videos</button>
+          </div>
+          <input id="feed-search" type="search" placeholder="Search feed...">
+        </div>
+
+        <div id="feed" class="feed-list">
+          <div class="empty-state">Your community feed will appear here.</div>
+        </div>
+
+        <button id="load-more-posts" class="secondary-btn full-btn" hidden>
+          Load more
+        </button>
       </section>
 
-      <section id="videos-view" class="view" hidden>
-        <div class="page-title"><div><span class="eyebrow">WATCH & DISCOVER</span><h1>Videos</h1><p class="muted">Community videos in a vertical player.</p></div></div>
-        <div id="video-feed" class="video-list"><div class="empty">Loading videos…</div></div>
-      </section>
-
+      <!-- MY PROFILE -->
       <section id="profile-view" class="view" hidden>
-        <div class="page-title"><div><span class="eyebrow">YOUR SPACE</span><h1>My profile</h1><p class="muted">Manage your public profile.</p></div></div>
-        <div class="card profile-card"><div id="my-profile"></div></div>
-        <form id="profile-form" class="card form-card">
-          <h2>Edit profile</h2><label for="profile-name">Full name</label><input id="profile-name" maxlength="60">
-          <label for="profile-username">Username</label><input id="profile-username" maxlength="30" placeholder="username">
-          <label for="profile-bio">Bio</label><textarea id="profile-bio" maxlength="250" placeholder="A little about you"></textarea>
-          <label for="avatar-file">Profile photo</label><input id="avatar-file" type="file" accept="image/jpeg,image/png,image/webp">
-          <button class="btn primary" type="submit">Save profile</button>
-        </form>
-        <h2 class="section-heading">Your posts</h2><div id="my-posts" class="post-list"></div>
+        <div class="page-heading">
+          <div>
+            <h1>My Profile</h1>
+            <p>Manage your public profile and posts.</p>
+          </div>
+        </div>
+
+        <div id="my-profile" class="card profile-card"></div>
+
+        <section class="card settings-card">
+          <h2>Edit profile</h2>
+          <form id="profile-form">
+            <label for="profile-name">Full name</label>
+            <input id="profile-name" type="text" maxlength="80">
+
+            <label for="profile-username">Username</label>
+            <input id="profile-username" type="text" maxlength="30"
+              placeholder="your_username">
+
+            <label for="profile-bio">About you</label>
+            <textarea id="profile-bio" maxlength="500"
+              placeholder="Write something about yourself..."></textarea>
+
+            <label for="avatar-file">Profile picture</label>
+            <input id="avatar-file" type="file" accept="image/*">
+
+            <button class="primary-btn" type="submit">Save profile</button>
+          </form>
+        </section>
+
+        <h2 class="section-heading">My posts</h2>
+        <div id="my-posts" class="feed-list"></div>
       </section>
 
+      <!-- DISCOVER PEOPLE -->
       <section id="search-view" class="view" hidden>
-        <div class="page-title"><div><span class="eyebrow">MEET THE COMMUNITY</span><h1>Discover people</h1><p class="muted">Find people by name or username.</p></div></div>
-        <div class="card form-card"><form id="search-form" class="search-form"><input id="search-input" type="search" placeholder="Search people…"><button class="btn primary">Search</button></form><div id="search-results"></div></div>
+        <div class="page-heading">
+          <div>
+            <h1>Discover People</h1>
+            <p>Find people in your community.</p>
+          </div>
+        </div>
+
+        <form id="search-form" class="card search-form">
+          <input id="search-input" type="search"
+            placeholder="Search by name or username...">
+          <button class="primary-btn" type="submit">Search</button>
+        </form>
+
+        <div id="search-results" class="results-list"></div>
       </section>
 
+      <!-- NOTIFICATIONS -->
       <section id="notifications-view" class="view" hidden>
-        <div class="page-title"><div><span class="eyebrow">STAY IN THE LOOP</span><h1>Notifications</h1></div></div>
-        <div class="card form-card"><div id="notifications-list"></div></div>
-      </section>
+        <div class="page-heading">
+          <div>
+            <h1>Notifications</h1>
+            <p>Your latest community activity.</p>
+          </div>
+        </div>
 
-      <section id="settings-view" class="view" hidden>
-        <div class="page-title"><div><span class="eyebrow">YOUR PREFERENCES</span><h1>Settings</h1><p class="muted">Choose how Kalim Social works for you.</p></div></div>
-        <div class="card form-card settings-card">
-          <h2>Experience</h2>
-          <label class="setting-row"><span><b>Autoplay videos</b><small>Videos start when visible in your feed.</small></span><input id="setting-autoplay" type="checkbox" class="switch"></label>
-          <label class="setting-row"><span><b>Muted videos by default</b><small>Keep videos muted until you turn sound on.</small></span><input id="setting-muted" type="checkbox" class="switch"></label>
-          <label class="setting-row"><span><b>Compact feed</b><small>Use a tighter layout for posts.</small></span><input id="setting-compact" type="checkbox" class="switch"></label>
-          <div class="settings-divider"></div>
-          <h2>Privacy & account</h2>
-          <label class="setting-row"><span><b>Show my profile in discovery</b><small>Allow your profile to appear in people search.</small></span><input id="setting-discoverable" type="checkbox" class="switch"></label>
-          <p class="tiny muted">Privacy preference is saved in this browser for now. Profile discovery filtering requires a matching database policy/query update before it can be enforced server-side.</p>
-          <button id="save-settings" class="btn primary">Save settings</button>
+        <div id="notifications-list" class="card notifications-list">
+          <div class="empty-state">No notifications yet.</div>
         </div>
       </section>
 
-      <section id="other-profile-view" class="view" hidden>
-        <button id="back-button" class="btn soft back-button"><i class="fa-solid fa-arrow-left"></i> Back</button>
-        <div class="card profile-card"><div id="other-profile"></div></div><h2 class="section-heading">Posts</h2><div id="other-posts" class="post-list"></div>
+      <!-- MESSAGES -->
+      <section id="messages-view" class="view" hidden>
+        <div class="page-heading">
+          <div>
+            <h1>Messages</h1>
+            <p>Private conversations.</p>
+          </div>
+        </div>
+
+        <div class="card empty-state">
+          Messaging is not enabled yet. It will be added after the core feed system.
+        </div>
       </section>
-    </div>
-    <aside class="right-rail">
-      <div class="card rail-card"><span class="rail-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span><h3>A better social space</h3><p>Share thoughtfully, respect others and help make Kalim Social welcoming for everyone.</p><div class="rail-note">♥ Be kind. Stay curious.</div></div>
-      <div class="rail-foot">Community guidelines · Privacy<br>© 2026 Kalim Social</div>
+
+      <!-- OTHER USER PROFILE -->
+      <section id="other-profile-view" class="view" hidden>
+        <div class="page-heading">
+          <div>
+            <h1>Member Profile</h1>
+            <p>Discover community members.</p>
+          </div>
+          <button id="back-button" class="secondary-btn">← Back</button>
+        </div>
+
+        <div id="other-profile" class="card profile-card"></div>
+        <h2 class="section-heading">Posts</h2>
+        <div id="other-posts" class="feed-list"></div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section id="settings-view" class="view" hidden>
+        <div class="page-heading">
+          <div>
+            <h1>Settings</h1>
+            <p>Personalize your Kalim Social experience.</p>
+          </div>
+        </div>
+
+        <section class="card settings-card">
+          <h2>Appearance</h2>
+          <label for="theme-select">Choose theme</label>
+          <select id="theme-select">
+            <option value="light">Light mode</option>
+            <option value="dark">Dark mode</option>
+          </select>
+        </section>
+
+        <section class="card settings-card">
+          <h2>Account</h2>
+          <p id="account-email" class="muted"></p>
+          <button id="settings-logout" class="secondary-btn">
+            Log out
+          </button>
+        </section>
+
+        <section class="card settings-card">
+          <h2>Media uploads</h2>
+          <p>Images and videos are stored in your Supabase Storage bucket.</p>
+          <p class="muted">
+            Free plan upload limits and storage quotas apply.
+          </p>
+        </section>
+      </section>
+
+    </section>
+
+    <!-- RIGHT SIDEBAR -->
+    <aside class="right-sidebar">
+
+      <section class="card right-card">
+        <h3>Complete Your Profile</h3>
+        <div class="profile-progress">
+          <div id="profile-progress-number">0%</div>
+          <div class="progress-track">
+            <div id="profile-progress-bar" class="progress-fill"></div>
+          </div>
+        </div>
+        <div id="profile-progress-items" class="progress-items">
+          <span>Profile information</span>
+          <span>Profile photo</span>
+          <span>About you</span>
+        </div>
+      </section>
+
+      <section class="card right-card">
+        <h3>Latest Updates</h3>
+        <div id="latest-updates">
+          <p class="muted">Recent community posts will appear here.</p>
+        </div>
+      </section>
+
+      <section class="card right-card">
+        <h3>Community</h3>
+        <p class="muted">
+          Connect with people, share your ideas and explore new posts.
+        </p>
+        <button class="secondary-btn full-btn" data-tab="search">
+          Discover members
+        </button>
+      </section>
+
     </aside>
-  </section>
-</main>
-<footer class="footer">Kalim Social <span>·</span> Connect. Share. Discover.</footer>
-<script src="app.js"></script>
+  </main>
+
+  <footer class="site-footer">
+    <span>© <span id="current-year"></span> Kalim Social</span>
+    <span>Connect. Share. Discover.</span>
+  </footer>
+
+  <script src="app.js"></script>
 </body>
 </html>
