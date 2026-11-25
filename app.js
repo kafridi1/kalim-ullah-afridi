@@ -1,5 +1,4 @@
 
-
 /* =========================================
    KALIMSOCIAL — MAIN APP
    GitHub Pages + Supabase
@@ -18,9 +17,10 @@ let activeFilter = "all";
 let activeConversationId = null;
 let messageChannel = null;
 let feedOffset = 0;
-const PAGE_SIZE = 15;
+let loadingFeed = false;
 
-const $ = (selector) => document.querySelector(selector);
+const PAGE_SIZE = 15;
+const $ = selector => document.querySelector(selector);
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -43,7 +43,7 @@ function safeImage(url) {
 }
 
 function formatDate(value) {
-  return new Date(value).toLocaleString();
+  return value ? new Date(value).toLocaleString() : "";
 }
 
 function escapeLike(value) {
@@ -58,12 +58,7 @@ document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
   if (!window.supabase) {
-    alert("Supabase library load nahi hui. Internet aur script order check karo.");
-    return;
-  }
-
-  if (SUPABASE_KEY.includes("PASTE_YOUR")) {
-    alert("app.js mein apni Supabase publishable key paste karo.");
+    alert("Supabase library load nahi hui. Script order check karo.");
     return;
   }
 
@@ -75,10 +70,11 @@ async function init() {
 
   if (error) {
     console.error(error);
+    alert(error.message);
     return;
   }
 
-  if (data.session) {
+  if (data.session?.user) {
     await showApp(data.session.user);
   } else {
     showAuth();
@@ -89,6 +85,7 @@ async function init() {
       if (session?.user) {
         await showApp(session.user);
       } else {
+        cleanupMessaging();
         showAuth();
       }
     }, 0);
@@ -106,7 +103,7 @@ function showAuth() {
   $("#auth-section")?.removeAttribute("hidden");
   $("#app")?.setAttribute("hidden", "");
   $("#header-login")?.removeAttribute("hidden");
-  $("#header-user")?.replaceChildren($("#header-login"));
+  $("#header-user")?.replaceChildren();
 }
 
 async function showApp(user) {
@@ -117,7 +114,7 @@ async function showApp(user) {
   $("#header-login")?.setAttribute("hidden", "");
 
   await loadMyProfile();
-  await loadFeed();
+  await loadFeed(true);
   await loadNotifications();
   await loadProfileStats();
   await loadConversations();
@@ -179,8 +176,13 @@ function renderMyProfile() {
   setText("#profile-username", "@" + (p.username || "member"));
   setText("#profile-bio", p.bio || "");
 
-  if ($("#sidebar-avatar")) $("#sidebar-avatar").src = safeImage(p.avatar_url);
-  if ($("#profile-avatar")) $("#profile-avatar").src = safeImage(p.avatar_url);
+  if ($("#sidebar-avatar")) {
+    $("#sidebar-avatar").src = safeImage(p.avatar_url);
+  }
+
+  if ($("#profile-avatar")) {
+    $("#profile-avatar").src = safeImage(p.avatar_url);
+  }
 
   if ($("#edit-full-name")) $("#edit-full-name").value = p.full_name || "";
   if ($("#edit-username")) $("#edit-username").value = p.username || "";
@@ -210,17 +212,17 @@ async function signup(event) {
   const password = $("#signup-password").value;
 
   if (!/^[a-z0-9_]{3,20}$/.test(username)) {
-    return showMessage("#auth-message", "Username 3–20 characters ka ho. Letters, numbers aur _ use karo.");
+    return showMessage(
+      "#auth-message",
+      "Username 3–20 characters ka ho. Letters, numbers aur _ use karo."
+    );
   }
 
   const { data, error } = await db.auth.signUp({
     email,
     password,
     options: {
-      data: {
-        full_name: fullName,
-        username
-      }
+      data: { full_name: fullName, username }
     }
   });
 
@@ -251,7 +253,11 @@ async function login(event) {
 
 async function logout() {
   if (!db) return;
-  await db.auth.signOut();
+
+  cleanupMessaging();
+
+  const { error } = await db.auth.signOut();
+  if (error) alert(error.message);
 }
 
 /* =========================================
@@ -270,7 +276,7 @@ function switchTab(tab) {
     button.classList.toggle("active", button.dataset.tab === tab);
   });
 
-  if (tab === "feed") loadFeed();
+  if (tab === "feed") loadFeed(true);
   if (tab === "profile") loadMyPosts();
   if (tab === "notifications") loadNotifications();
   if (tab === "messages") loadConversations();
@@ -284,10 +290,13 @@ async function uploadMedia(file) {
   if (!file) return null;
 
   if (file.size > MAX_FILE_SIZE) {
-    throw new Error("File 50MB se chhoti honi chahiye. Supabase project limit bhi apply hoti hai.");
+    throw new Error("File 50MB se chhoti honi chahiye.");
   }
 
-  if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+  if (
+    !file.type.startsWith("image/") &&
+    !file.type.startsWith("video/")
+  ) {
     throw new Error("Sirf image ya video upload kar sakte ho.");
   }
 
@@ -335,7 +344,7 @@ async function uploadMedia(file) {
 async function publishPost() {
   if (!currentUser) return;
 
-  const content = $("#post-content").value.trim();
+  const content = $("#post-content")?.value.trim() || "";
   const file = $("#post-media")?.files?.[0];
 
   if (!content && !file) {
@@ -345,9 +354,7 @@ async function publishPost() {
   try {
     let media = null;
 
-    if (file) {
-      media = await uploadMedia(file);
-    }
+    if (file) media = await uploadMedia(file);
 
     const { error } = await db.from("posts").insert({
       user_id: currentUser.id,
@@ -360,12 +367,13 @@ async function publishPost() {
 
     if (error) throw error;
 
-    $("#post-content").value = "";
-    $("#post-media").value = "";
+    if ($("#post-content")) $("#post-content").value = "";
+    if ($("#post-media")) $("#post-media").value = "";
     $("#media-preview")?.replaceChildren();
 
     showMessage("#upload-status", "Post published!");
-    await loadFeed();
+
+    await loadFeed(true);
     await loadMyPosts();
 
   } catch (error) {
@@ -378,13 +386,18 @@ async function publishPost() {
    FEED
 ========================================= */
 
-async function loadFeed() {
-  if (!currentUser) return;
+async function loadFeed(reset = true) {
+  if (!currentUser || loadingFeed) return;
 
   const feed = $("#feed");
   if (!feed) return;
 
-  feed.replaceChildren(el("p", "", "Loading posts..."));
+  loadingFeed = true;
+
+  if (reset) {
+    feedOffset = 0;
+    feed.replaceChildren(el("p", "", "Loading posts..."));
+  }
 
   let query = db
     .from("posts")
@@ -400,47 +413,74 @@ async function loadFeed() {
 
   if (error) {
     console.error(error);
-    feed.replaceChildren(el("p", "", "Feed load nahi hui."));
+    if (reset) feed.replaceChildren(el("p", "", "Feed load nahi hui."));
+    loadingFeed = false;
     return;
   }
 
   let rows = data || [];
 
   if (activeFilter === "following") {
-    const { data: follows } = await db
+    const { data: follows, error: followError } = await db
       .from("follows")
       .select("following_id")
       .eq("follower_id", currentUser.id);
 
+    if (followError) {
+      console.error(followError);
+      loadingFeed = false;
+      return;
+    }
+
     const followingIds = (follows || []).map(x => x.following_id);
+
     rows = rows.filter(post =>
       post.user_id === currentUser.id ||
       followingIds.includes(post.user_id)
     );
   }
 
-  posts = rows;
-  await renderPosts(rows, feed);
+  if (reset) {
+    posts = rows;
+  } else {
+    posts = [...posts, ...rows];
+  }
+
+  await renderPosts(rows, feed, !reset);
+
+  feedOffset += (data || []).length;
+
+  const moreButton = $("#load-more-posts");
+  if (moreButton) {
+    moreButton.hidden = (data || []).length < PAGE_SIZE;
+  }
+
+  loadingFeed = false;
 }
 
-async function renderPosts(rows, container) {
-  container.replaceChildren();
+async function renderPosts(rows, container, append = false) {
+  if (!append) container.replaceChildren();
 
-  if (!rows.length) {
-    container.append(el("p", "empty-state", "Abhi koi post nahi. Pehli post share karo!"));
+  if (!rows.length && !append) {
+    container.append(
+      el("p", "empty-state", "Abhi koi post nahi. Pehli post share karo!")
+    );
     return;
   }
 
+  if (!rows.length) return;
+
   const authorIds = [...new Set(rows.map(p => p.user_id))];
+  const postIds = rows.map(p => p.id);
 
   const { data: profiles } = await db
     .from("profiles")
     .select("id,full_name,username,avatar_url")
     .in("id", authorIds);
 
-  const profileMap = new Map((profiles || []).map(p => [p.id, p]));
-
-  const postIds = rows.map(p => p.id);
+  const profileMap = new Map(
+    (profiles || []).map(p => [p.id, p])
+  );
 
   const { data: likes } = await db
     .from("likes")
@@ -459,8 +499,8 @@ async function renderPosts(rows, container) {
     const liked = postLikes.some(x => x.user_id === currentUser.id);
 
     const card = el("article", "post-card");
-
     const header = el("div", "post-header");
+
     const avatar = el("img");
     avatar.src = safeImage(author?.avatar_url);
     avatar.alt = "Profile picture";
@@ -468,7 +508,11 @@ async function renderPosts(rows, container) {
     const authorInfo = el("div");
     authorInfo.append(
       el("strong", "", author?.full_name || "Member"),
-      el("p", "", "@" + (author?.username || "member") + " · " + formatDate(post.created_at))
+      el(
+        "p",
+        "",
+        "@" + (author?.username || "member") + " · " + formatDate(post.created_at)
+      )
     );
 
     header.append(avatar, authorInfo);
@@ -497,10 +541,20 @@ async function renderPosts(rows, container) {
 
     const actions = el("div", "post-actions");
 
-    const likeButton = el("button", "", (liked ? "❤️ " : "🤍 ") + postLikes.length);
+    const likeButton = el(
+      "button",
+      "",
+      (liked ? "❤️ " : "🤍 ") + postLikes.length
+    );
+
     likeButton.addEventListener("click", () => toggleLike(post.id, liked));
 
-    const commentButton = el("button", "", "💬 " + commentCount + " Comments");
+    const commentButton = el(
+      "button",
+      "",
+      "💬 " + commentCount + " Comments"
+    );
+
     commentButton.addEventListener("click", () => showComments(post.id));
 
     actions.append(likeButton, commentButton);
@@ -529,6 +583,7 @@ async function toggleLike(postId, liked) {
       .eq("user_id", currentUser.id);
 
     if (error) return alert(error.message);
+
   } else {
     const { error } = await db.from("likes").insert({
       post_id: postId,
@@ -540,7 +595,7 @@ async function toggleLike(postId, liked) {
     }
   }
 
-  await loadFeed();
+  await loadFeed(true);
   await loadMyPosts();
 }
 
@@ -568,7 +623,11 @@ async function showComments(postId) {
       .maybeSingle();
 
     container.append(
-      el("p", "", "@" + (profile?.username || "member") + ": " + comment.content)
+      el(
+        "p",
+        "",
+        "@" + (profile?.username || "member") + ": " + comment.content
+      )
     );
   }
 
@@ -599,13 +658,12 @@ async function showComments(postId) {
 
     modalClose();
     await showComments(postId);
-    await loadFeed();
+    await loadFeed(true);
   });
 
   container.append(form);
 
-  const old = $("#comment-modal");
-  if (old) old.remove();
+  $("#comment-modal")?.remove();
 
   const modal = el("div");
   modal.id = "comment-modal";
@@ -645,7 +703,7 @@ async function deletePost(postId) {
 
   if (error) return alert(error.message);
 
-  await loadFeed();
+  await loadFeed(true);
   await loadMyPosts();
 }
 
@@ -711,13 +769,16 @@ async function toggleFollow(targetId, isFollowing) {
       .eq("following_id", targetId);
 
     if (error) return alert(error.message);
+
   } else {
     const { error } = await db.from("follows").insert({
       follower_id: currentUser.id,
       following_id: targetId
     });
 
-    if (error && error.code !== "23505") return alert(error.message);
+    if (error && error.code !== "23505") {
+      return alert(error.message);
+    }
   }
 
   await loadProfileStats();
@@ -752,7 +813,7 @@ async function loadProfileStats() {
 ========================================= */
 
 async function searchPeople() {
-  const term = escapeLike($("#feed-search").value.trim());
+  const term = escapeLike($("#feed-search")?.value.trim() || "");
 
   if (term.length < 2) {
     return showMessage("#search-results", "Kam az kam 2 characters likho.");
@@ -772,11 +833,16 @@ async function searchPeople() {
   for (const person of (data || [])) {
     const row = el("div", "new-message-person");
     const img = el("img");
+
     img.src = safeImage(person.avatar_url);
     img.width = 42;
     img.height = 42;
 
-    const info = el("span", "", `${person.full_name || "Member"} (@${person.username || "member"})`);
+    const info = el(
+      "span",
+      "",
+      `${person.full_name || "Member"} (@${person.username || "member"})`
+    );
 
     const view = el("button", "secondary-btn", "View profile");
     view.addEventListener("click", () => openOtherProfile(person.id));
@@ -803,10 +869,13 @@ async function openOtherProfile(userId) {
     .maybeSingle();
 
   const container = $("#other-profile-content");
+  if (!container) return;
+
   container.replaceChildren();
 
   const card = el("div", "card");
   const img = el("img");
+
   img.src = safeImage(person.avatar_url);
   img.width = 90;
   img.height = 90;
@@ -819,15 +888,25 @@ async function openOtherProfile(userId) {
   );
 
   if (userId !== currentUser.id) {
-    const followButton = el("button", "primary-btn", follow ? "Following" : "Follow");
-    followButton.addEventListener("click", () => toggleFollow(userId, !!follow));
+    const followButton = el(
+      "button",
+      "primary-btn",
+      follow ? "Following" : "Follow"
+    );
+
+    followButton.addEventListener("click", () => {
+      toggleFollow(userId, !!follow);
+    });
+
     card.append(followButton);
 
     const messageButton = el("button", "secondary-btn", "Message");
+
     messageButton.addEventListener("click", async () => {
       switchTab("messages");
       await startConversation(userId);
     });
+
     card.append(messageButton);
   }
 
@@ -841,6 +920,7 @@ async function openOtherProfile(userId) {
 
   const postContainer = el("div");
   container.append(postContainer);
+
   await renderPosts(personPosts || [], postContainer);
 
   switchTab("other-profile");
@@ -872,10 +952,12 @@ async function loadNotifications() {
 
   for (const item of (data || [])) {
     const row = el("div");
+
     row.append(
-      el("p", "", item.type || "New notification"),
+      el("p", "", item.message || item.type || "New notification"),
       el("small", "", formatDate(item.created_at))
     );
+
     container.append(row);
   }
 
@@ -888,6 +970,15 @@ async function loadNotifications() {
    MESSAGING
 ========================================= */
 
+function cleanupMessaging() {
+  if (messageChannel && db) {
+    db.removeChannel(messageChannel);
+  }
+
+  messageChannel = null;
+  activeConversationId = null;
+}
+
 async function loadConversations() {
   if (!currentUser || !$("#conversation-items")) return;
 
@@ -896,24 +987,34 @@ async function loadConversations() {
 
   const { data: memberships, error } = await db
     .from("conversation_members")
-    .select("conversation_id,last_read_at")
+    .select("conversation_id")
     .eq("user_id", currentUser.id);
 
   if (error) {
     console.error(error);
-    container.replaceChildren(el("p", "", "Chats load nahi huay."));
+    container.replaceChildren(
+      el("p", "", "Chats load nahi huay: " + error.message)
+    );
     return;
   }
 
   container.replaceChildren();
 
   for (const membership of (memberships || [])) {
-    const { data: members } = await db
+    const { data: members, error: membersError } = await db
       .from("conversation_members")
       .select("user_id")
       .eq("conversation_id", membership.conversation_id);
 
-    const other = (members || []).find(m => m.user_id !== currentUser.id);
+    if (membersError) {
+      console.error(membersError);
+      continue;
+    }
+
+    const other = (members || []).find(
+      m => m.user_id !== currentUser.id
+    );
+
     if (!other) continue;
 
     const { data: profile } = await db
@@ -933,6 +1034,7 @@ async function loadConversations() {
       .maybeSingle();
 
     const row = el("div", "conversation-item");
+
     row.append(
       el("strong", "", profile.full_name || profile.username || "Member"),
       el("small", "", lastMessage?.content || "Start a conversation")
@@ -946,25 +1048,36 @@ async function loadConversations() {
   }
 
   if (!memberships?.length) {
-    container.append(el("p", "empty-state", "No conversations yet. New Message par click karo."));
+    container.append(
+      el("p", "empty-state", "No conversations yet. New Message par click karo.")
+    );
   }
 }
 
 async function startConversation(otherUserId) {
   if (!currentUser || otherUserId === currentUser.id) return;
 
-  const { data: mine } = await db
+  // Check if a conversation already exists
+  const { data: mine, error: mineError } = await db
     .from("conversation_members")
     .select("conversation_id")
     .eq("user_id", currentUser.id);
 
+  if (mineError) {
+    return alert("Chat check error: " + mineError.message);
+  }
+
   for (const item of (mine || [])) {
-    const { data: other } = await db
+    const { data: other, error: otherError } = await db
       .from("conversation_members")
       .select("user_id")
       .eq("conversation_id", item.conversation_id)
       .eq("user_id", otherUserId)
       .maybeSingle();
+
+    if (otherError) {
+      return alert(otherError.message);
+    }
 
     if (other) {
       const { data: profile } = await db
@@ -973,66 +1086,52 @@ async function startConversation(otherUserId) {
         .eq("id", otherUserId)
         .single();
 
-      return openConversation(item.conversation_id, profile);
+      await openConversation(item.conversation_id, profile);
+      return;
     }
   }
 
-  const { data: conversation, error } = await db
-    .from("conversations")
-    .insert({})
-    .select()
-    .single();
+  // Create conversation using the secure SQL RPC function
+  const { data: conversationId, error } = await db.rpc(
+    "create_conversation",
+    {
+      p_other_user_id: otherUserId
+    }
+  );
 
-  if (error) return alert("Conversation create error: " + error.message);
-
-  const { error: firstMemberError } = await db
-    .from("conversation_members")
-    .insert({
-      conversation_id: conversation.id,
-      user_id: currentUser.id
-    });
-
-  if (firstMemberError) return alert(firstMemberError.message);
-
-  const { error: secondMemberError } = await db
-    .from("conversation_members")
-    .insert({
-      conversation_id: conversation.id,
-      user_id: otherUserId
-    });
-
-  if (secondMemberError) {
-    return alert("Doosra member add nahi hua: " + secondMemberError.message);
+  if (error) {
+    return alert("Conversation create error: " + error.message);
   }
 
-  const { data: profile } = await db
+  const { data: profile, error: profileError } = await db
     .from("profiles")
     .select("id,full_name,username,avatar_url")
     .eq("id", otherUserId)
     .single();
 
+  if (profileError) {
+    return alert(profileError.message);
+  }
+
   await loadConversations();
-  await openConversation(conversation.id, profile);
+  await openConversation(conversationId, profile);
 }
 
 async function openConversation(conversationId, profile) {
   activeConversationId = conversationId;
 
-  $("#chat-empty").hidden = true;
-  $("#active-chat").hidden = false;
+  if ($("#chat-empty")) $("#chat-empty").hidden = true;
+  if ($("#active-chat")) $("#active-chat").hidden = false;
 
   const header = $("#chat-header");
-  header.replaceChildren(
-    el("strong", "", profile?.full_name || profile?.username || "Member")
-  );
+
+  if (header) {
+    header.replaceChildren(
+      el("strong", "", profile?.full_name || profile?.username || "Member")
+    );
+  }
 
   await loadMessages();
-
-  await db
-    .from("conversation_members")
-    .update({ last_read_at: new Date().toISOString() })
-    .eq("conversation_id", conversationId)
-    .eq("user_id", currentUser.id);
 
   if (messageChannel) {
     await db.removeChannel(messageChannel);
@@ -1052,17 +1151,17 @@ async function openConversation(conversationId, profile) {
       () => loadMessages()
     )
     .subscribe();
-
-  await loadConversations();
 }
 
 async function loadMessages() {
   if (!activeConversationId) return;
 
+  const conversationId = activeConversationId;
+
   const { data, error } = await db
     .from("messages")
     .select("*")
-    .eq("conversation_id", activeConversationId)
+    .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true })
     .limit(100);
 
@@ -1071,7 +1170,12 @@ async function loadMessages() {
     return;
   }
 
+  // Avoid showing old conversation messages if user switched chats
+  if (conversationId !== activeConversationId) return;
+
   const container = $("#chat-messages");
+  if (!container) return;
+
   container.replaceChildren();
 
   for (const message of (data || [])) {
@@ -1079,7 +1183,8 @@ async function loadMessages() {
 
     const bubble = el(
       "div",
-      "message-bubble" + (message.sender_id === currentUser.id ? " mine" : ""),
+      "message-bubble" +
+        (message.sender_id === currentUser.id ? " mine" : ""),
       message.content
     );
 
@@ -1096,12 +1201,16 @@ async function loadMessages() {
 async function sendMessage(event) {
   event.preventDefault();
 
-  if (!activeConversationId) return;
+  if (!activeConversationId || !currentUser) return;
 
   const input = $("#message-input");
-  const content = input.value.trim();
+  const content = input?.value.trim() || "";
 
   if (!content) return;
+
+  if (content.length > 2000) {
+    return alert("Message 2000 characters se chhota hona chahiye.");
+  }
 
   const { error } = await db.from("messages").insert({
     conversation_id: activeConversationId,
@@ -1109,21 +1218,20 @@ async function sendMessage(event) {
     content
   });
 
-  if (error) return alert("Message send error: " + error.message);
+  if (error) {
+    return alert("Message send error: " + error.message);
+  }
 
   input.value = "";
-
-  await db
-    .from("conversations")
-    .update({ updated_at: new Date().toISOString() })
-    .eq("id", activeConversationId);
 
   await loadMessages();
   await loadConversations();
 }
 
 async function searchMessagePeople() {
-  const term = escapeLike($("#new-message-search").value.trim());
+  const term = escapeLike(
+    $("#new-message-search")?.value.trim() || ""
+  );
 
   if (term.length < 2) return;
 
@@ -1134,9 +1242,14 @@ async function searchMessagePeople() {
     .neq("id", currentUser.id)
     .limit(15);
 
-  if (error) return console.error(error);
+  if (error) {
+    console.error(error);
+    return;
+  }
 
   const container = $("#new-message-results");
+  if (!container) return;
+
   container.replaceChildren();
 
   for (const person of (data || [])) {
@@ -1147,8 +1260,12 @@ async function searchMessagePeople() {
     );
 
     button.type = "button";
+
     button.addEventListener("click", async () => {
-      $("#new-message-modal").hidden = true;
+      if ($("#new-message-modal")) {
+        $("#new-message-modal").hidden = true;
+      }
+
       await startConversation(person.id);
     });
 
@@ -1189,6 +1306,7 @@ function bindEvents() {
 
   $("#publish-post")?.addEventListener("click", publishPost);
   $("#profile-form")?.addEventListener("submit", saveProfile);
+
   $("#search-form")?.addEventListener("submit", event => {
     event.preventDefault();
     searchPeople();
@@ -1198,7 +1316,9 @@ function bindEvents() {
   $("#settings-logout")?.addEventListener("click", logout);
 
   document.querySelectorAll("[data-tab]").forEach(button => {
-    button.addEventListener("click", () => switchTab(button.dataset.tab));
+    button.addEventListener("click", () => {
+      switchTab(button.dataset.tab);
+    });
   });
 
   document.querySelectorAll("[data-feed-filter]").forEach(button => {
@@ -1210,23 +1330,25 @@ function bindEvents() {
         item.classList.toggle("active", item === button);
       });
 
-      loadFeed();
+      loadFeed(true);
     });
   });
 
   $("#load-more-posts")?.addEventListener("click", () => {
-    feedOffset += PAGE_SIZE;
-    loadFeed();
+    loadFeed(false);
   });
 
   $("#post-media")?.addEventListener("change", event => {
     const file = event.target.files?.[0];
     const preview = $("#media-preview");
 
+    if (!preview) return;
+
     preview.replaceChildren();
     if (!file) return;
 
     const url = URL.createObjectURL(file);
+
     const media = file.type.startsWith("video/")
       ? el("video")
       : el("img");
@@ -1245,14 +1367,22 @@ function bindEvents() {
   });
 
   $("#new-message-button")?.addEventListener("click", () => {
-    $("#new-message-modal").hidden = false;
+    if ($("#new-message-modal")) {
+      $("#new-message-modal").hidden = false;
+    }
   });
 
   $("#close-message-modal")?.addEventListener("click", () => {
-    $("#new-message-modal").hidden = true;
+    if ($("#new-message-modal")) {
+      $("#new-message-modal").hidden = true;
+    }
   });
 
-  $("#new-message-search")?.addEventListener("input", searchMessagePeople);
+  $("#new-message-search")?.addEventListener(
+    "input",
+    searchMessagePeople
+  );
+
   $("#message-form")?.addEventListener("submit", sendMessage);
 
   $("#conversation-search")?.addEventListener("input", event => {
@@ -1265,7 +1395,10 @@ function bindEvents() {
 
   $("#global-search")?.addEventListener("keydown", event => {
     if (event.key === "Enter") {
-      $("#feed-search").value = event.target.value;
+      if ($("#feed-search")) {
+        $("#feed-search").value = event.target.value;
+      }
+
       switchTab("search");
       searchPeople();
     }
