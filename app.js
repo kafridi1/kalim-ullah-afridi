@@ -1,255 +1,304 @@
 
-/* ======================================
-   KALIM SOCIAL - READY APP.JS
-====================================== */
+
+/* =========================================
+   KALIMSOCIAL — MAIN APP
+   GitHub Pages + Supabase
+========================================= */
 
 const SUPABASE_URL = "https://kvwoyeusveepyjewrzpi.supabase.co";
 const SUPABASE_KEY = "sb_publishable__kSVXsmw0d-erIP9doLa3g_J29aYfiv";
 const STORAGE_BUCKET = "social-images";
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
-let db = null;
+let db;
 let currentUser = null;
 let currentProfile = null;
-let selectedFile = null;
-let currentFilter = "all";
-let feedSearch = "";
-let realtimeChannel = null;
-let isLoadingFeed = false;
+let posts = [];
+let activeFilter = "all";
+let activeConversationId = null;
+let messageChannel = null;
+let feedOffset = 0;
+const PAGE_SIZE = 15;
 
-const $ = (s) => document.querySelector(s);
-const $$ = (s) => [...document.querySelectorAll(s)];
+const $ = (selector) => document.querySelector(selector);
 
-function showMessage(text, error = false) {
-  const el = $("#message");
-  if (el) {
-    el.textContent = text;
-    el.style.color = error ? "#e5485d" : "";
-  }
-  console.log(text);
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
 }
 
-function notify(text, error = false) {
-  const el = $("#upload-status");
-  if (el) {
-    el.textContent = text;
-    el.style.color = error ? "#e5485d" : "";
-  }
-  showMessage(text, error);
+function setText(selector, value) {
+  const node = $(selector);
+  if (node) node.textContent = value ?? "";
 }
 
-function makeElement(tag, className = "", text = "") {
-  const el = document.createElement(tag);
-  if (className) el.className = className;
-  if (text) el.textContent = text;
-  return el;
+function showMessage(selector, message) {
+  setText(selector, message);
 }
 
-function makeButton(text, callback, className = "") {
-  const btn = makeElement("button", className, text);
-  btn.type = "button";
-  btn.addEventListener("click", callback);
-  return btn;
-}
-
-function setButtonLoading(btn, loading, text = "Please wait...") {
-  if (!btn) return;
-
-  if (loading) {
-    btn.dataset.oldText = btn.textContent;
-    btn.textContent = text;
-    btn.disabled = true;
-  } else {
-    btn.textContent = btn.dataset.oldText || btn.textContent;
-    btn.disabled = false;
-  }
+function safeImage(url) {
+  return url || "https://placehold.co/100x100?text=User";
 }
 
 function formatDate(value) {
-  if (!value) return "";
   return new Date(value).toLocaleString();
 }
 
-function getInitials(name = "Member") {
-  return name.split(/\s+/).slice(0, 2)
-    .map(x => x[0] || "")
-    .join("").toUpperCase();
+function escapeLike(value) {
+  return value.replace(/[,%()]/g, "");
 }
 
-function makeAvatar(profile) {
-  if (profile?.avatar_url) {
-    const img = makeElement("img", "avatar");
-    img.src = profile.avatar_url;
-    img.alt = "Avatar";
-    return img;
-  }
+/* =========================================
+   INITIALIZATION
+========================================= */
 
-  return makeElement(
-    "div",
-    "avatar avatar-placeholder",
-    getInitials(profile?.full_name || "Member")
-  );
-}
+document.addEventListener("DOMContentLoaded", init);
 
-/* ======================================
-   AUTH AND PROFILE
-====================================== */
-
-async function getProfile(userId) {
-  const { data, error } = await db
-    .from("profiles")
-    .select("*")
-    .eq("id", userId)
-    .maybeSingle();
-
-  if (error) throw error;
-  return data;
-}
-
-async function refreshProfile() {
-  if (!currentUser) return;
-
-  currentProfile = await getProfile(currentUser.id);
-  updateProfileUI();
-}
-
-function updateProfileUI() {
-  if (!currentProfile) return;
-
-  const name = currentProfile.full_name || "Member";
-  const username = currentProfile.username
-    ? "@" + currentProfile.username
-    : "@member";
-
-  const sidebarName = $("#sidebar-name");
-  const sidebarUsername = $("#sidebar-username");
-
-  if (sidebarName) sidebarName.textContent = name;
-  if (sidebarUsername) sidebarUsername.textContent = username;
-
-  const oldAvatar = $("#sidebar-avatar");
-  if (oldAvatar) {
-    const newAvatar = makeAvatar(currentProfile);
-    newAvatar.id = "sidebar-avatar";
-    oldAvatar.replaceWith(newAvatar);
-  }
-
-  const email = $("#account-email");
-  if (email) email.textContent = currentUser.email || "";
-
-  updateProfileProgress();
-}
-
-async function updateApp(session) {
-  currentUser = session?.user || null;
-
-  const auth = $("#auth-section");
-  const home = $("#home-section");
-  const headerLogin = $("#header-login");
-  const headerUser = $("#header-user");
-
-  if (auth) auth.hidden = !!currentUser;
-  if (home) home.hidden = !currentUser;
-  if (headerLogin) headerLogin.hidden = !!currentUser;
-  if (headerUser) headerUser.hidden = !currentUser;
-
-  if (!currentUser) {
-    currentProfile = null;
-
-    if (realtimeChannel && db) {
-      await db.removeChannel(realtimeChannel);
-      realtimeChannel = null;
-    }
+async function init() {
+  if (!window.supabase) {
+    alert("Supabase library load nahi hui. Internet aur script order check karo.");
     return;
   }
 
-  try {
-    await refreshProfile();
-    await loadFollowing();
-    subscribeRealtime();
-    switchTab("feed");
-  } catch (error) {
+  if (SUPABASE_KEY.includes("PASTE_YOUR")) {
+    alert("app.js mein apni Supabase publishable key paste karo.");
+    return;
+  }
+
+  db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  bindEvents();
+
+  const { data, error } = await db.auth.getSession();
+
+  if (error) {
     console.error(error);
-    showMessage(error.message, true);
+    return;
+  }
+
+  if (data.session) {
+    await showApp(data.session.user);
+  } else {
+    showAuth();
+  }
+
+  db.auth.onAuthStateChange((event, session) => {
+    setTimeout(async () => {
+      if (session?.user) {
+        await showApp(session.user);
+      } else {
+        showAuth();
+      }
+    }, 0);
+  });
+}
+
+/* =========================================
+   AUTHENTICATION
+========================================= */
+
+function showAuth() {
+  currentUser = null;
+  currentProfile = null;
+
+  $("#auth-section")?.removeAttribute("hidden");
+  $("#app")?.setAttribute("hidden", "");
+  $("#header-login")?.removeAttribute("hidden");
+  $("#header-user")?.replaceChildren($("#header-login"));
+}
+
+async function showApp(user) {
+  currentUser = user;
+
+  $("#auth-section")?.setAttribute("hidden", "");
+  $("#app")?.removeAttribute("hidden");
+  $("#header-login")?.setAttribute("hidden", "");
+
+  await loadMyProfile();
+  await loadFeed();
+  await loadNotifications();
+  await loadProfileStats();
+  await loadConversations();
+
+  setText("#account-email", user.email || "");
+  setText("#header-user", currentProfile?.full_name || "Member");
+
+  applyTheme();
+}
+
+async function loadMyProfile() {
+  if (!currentUser) return;
+
+  const { data, error } = await db
+    .from("profiles")
+    .select("*")
+    .eq("id", currentUser.id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Profile error:", error);
+    return;
+  }
+
+  currentProfile = data;
+
+  if (!currentProfile) {
+    const username = "user" + currentUser.id.slice(0, 8);
+
+    const { data: created, error: createError } = await db
+      .from("profiles")
+      .upsert({
+        id: currentUser.id,
+        full_name: currentUser.user_metadata?.full_name || "New Member",
+        username
+      })
+      .select()
+      .single();
+
+    if (createError) {
+      console.error(createError);
+      return;
+    }
+
+    currentProfile = created;
+  }
+
+  renderMyProfile();
+}
+
+function renderMyProfile() {
+  if (!currentProfile) return;
+
+  const p = currentProfile;
+
+  setText("#sidebar-name", p.full_name || "Member");
+  setText("#sidebar-username", "@" + (p.username || "member"));
+  setText("#profile-name", p.full_name || "Member");
+  setText("#profile-username", "@" + (p.username || "member"));
+  setText("#profile-bio", p.bio || "");
+
+  if ($("#sidebar-avatar")) $("#sidebar-avatar").src = safeImage(p.avatar_url);
+  if ($("#profile-avatar")) $("#profile-avatar").src = safeImage(p.avatar_url);
+
+  if ($("#edit-full-name")) $("#edit-full-name").value = p.full_name || "";
+  if ($("#edit-username")) $("#edit-username").value = p.username || "";
+  if ($("#edit-bio")) $("#edit-bio").value = p.bio || "";
+  if ($("#edit-avatar")) $("#edit-avatar").value = p.avatar_url || "";
+
+  const completed = [
+    p.full_name,
+    p.username,
+    p.bio,
+    p.avatar_url
+  ].filter(Boolean).length * 25;
+
+  setText("#profile-progress-number", completed + "%");
+
+  if ($("#profile-progress-bar")) {
+    $("#profile-progress-bar").style.width = completed + "%";
   }
 }
 
-/* ======================================
-   NAVIGATION
-====================================== */
+async function signup(event) {
+  event.preventDefault();
 
-function switchTab(tab) {
-  const viewIds = [
-    "feed",
-    "profile",
-    "search",
-    "notifications",
-    "messages",
-    "settings",
-    "other-profile"
-  ];
+  const fullName = $("#signup-name").value.trim();
+  const username = $("#signup-username").value.trim().toLowerCase();
+  const email = $("#signup-email").value.trim();
+  const password = $("#signup-password").value;
 
-  viewIds.forEach(name => {
-    const view = $(`#${name}-view`);
-    if (view) view.hidden = name !== tab;
+  if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+    return showMessage("#auth-message", "Username 3–20 characters ka ho. Letters, numbers aur _ use karo.");
+  }
+
+  const { data, error } = await db.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        full_name: fullName,
+        username
+      }
+    }
   });
 
-  $$("[data-tab]").forEach(btn => {
-    btn.classList.toggle("active", btn.dataset.tab === tab);
+  if (error) {
+    return showMessage("#auth-message", error.message);
+  }
+
+  if (data.user && !data.session) {
+    showMessage("#auth-message", "Account create ho gaya. Email confirmation check karo.");
+  } else {
+    showMessage("#auth-message", "Account created!");
+  }
+}
+
+async function login(event) {
+  event.preventDefault();
+
+  const email = $("#login-email").value.trim();
+  const password = $("#login-password").value;
+
+  const { error } = await db.auth.signInWithPassword({
+    email,
+    password
+  });
+
+  if (error) showMessage("#auth-message", error.message);
+}
+
+async function logout() {
+  if (!db) return;
+  await db.auth.signOut();
+}
+
+/* =========================================
+   NAVIGATION
+========================================= */
+
+function switchTab(tab) {
+  document.querySelectorAll(".view").forEach(view => {
+    view.hidden = true;
+  });
+
+  const target = $("#" + tab + "-view");
+  if (target) target.hidden = false;
+
+  document.querySelectorAll("[data-tab]").forEach(button => {
+    button.classList.toggle("active", button.dataset.tab === tab);
   });
 
   if (tab === "feed") loadFeed();
-  if (tab === "profile") loadMyProfile();
+  if (tab === "profile") loadMyPosts();
   if (tab === "notifications") loadNotifications();
+  if (tab === "messages") loadConversations();
 }
 
-/* ======================================
-   FILE UPLOAD
-====================================== */
-
-function showProgress(percent) {
-  const wrap = $("#upload-progress-wrap");
-  const bar = $("#upload-progress");
-  const text = $("#upload-progress-text");
-
-  if (wrap) wrap.hidden = false;
-  if (bar) bar.style.width = percent + "%";
-  if (text) text.textContent = percent + "%";
-}
-
-function hideProgress() {
-  const wrap = $("#upload-progress-wrap");
-  if (wrap) wrap.hidden = true;
-}
+/* =========================================
+   IMAGE / VIDEO UPLOAD
+========================================= */
 
 async function uploadMedia(file) {
   if (!file) return null;
 
-  const image = file.type.startsWith("image/");
-  const video = file.type.startsWith("video/");
-
-  if (!image && !video) {
-    throw new Error("Only images and videos are supported.");
-  }
-
   if (file.size > MAX_FILE_SIZE) {
-    throw new Error("File size must be 50 MB or less.");
+    throw new Error("File 50MB se chhoti honi chahiye. Supabase project limit bhi apply hoti hai.");
   }
 
-  const allowed = [
-    "image/jpeg", "image/png", "image/webp", "image/gif",
-    "video/mp4", "video/webm"
-  ];
-
-  if (!allowed.includes(file.type)) {
-    throw new Error("Unsupported file format.");
+  if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+    throw new Error("Sirf image ya video upload kar sakte ho.");
   }
 
-  const filename = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const path = `${currentUser.id}/${crypto.randomUUID()}-${filename}`;
+  const extension = file.name.split(".").pop().toLowerCase();
+  const path = `${currentUser.id}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
 
-  notify("Uploading...");
-  showProgress(10);
+  if ($("#upload-progress-wrap")) {
+    $("#upload-progress-wrap").hidden = false;
+  }
+
+  setText("#upload-progress-text", "Uploading...");
 
   const { error } = await db.storage
     .from(STORAGE_BUCKET)
@@ -261,74 +310,48 @@ async function uploadMedia(file) {
 
   if (error) throw error;
 
-  showProgress(100);
-
   const { data } = db.storage
     .from(STORAGE_BUCKET)
     .getPublicUrl(path);
 
+  if ($("#upload-progress")) {
+    $("#upload-progress").style.width = "100%";
+  }
+
+  setText("#upload-progress-text", "Upload complete");
+
   return {
     url: data.publicUrl,
-    type: video ? "video" : "image",
+    type: file.type.startsWith("video/") ? "video" : "image",
     name: file.name,
     size: file.size
   };
 }
 
-function previewMedia(file) {
-  const preview = $("#media-preview");
-  if (!preview) return;
-
-  preview.replaceChildren();
-
-  if (!file) {
-    preview.hidden = true;
-    return;
-  }
-
-  const url = URL.createObjectURL(file);
-
-  if (file.type.startsWith("video/")) {
-    const video = makeElement("video");
-    video.src = url;
-    video.controls = true;
-    video.playsInline = true;
-    preview.append(video);
-  } else {
-    const img = makeElement("img");
-    img.src = url;
-    img.alt = "Preview";
-    preview.append(img);
-  }
-
-  preview.hidden = false;
-}
-
-/* ======================================
+/* =========================================
    CREATE POST
-====================================== */
+========================================= */
 
-async function createPost() {
-  const content = $("#post-content")?.value.trim() || "";
+async function publishPost() {
+  if (!currentUser) return;
 
-  if (!content && !selectedFile) {
-    notify("Write a post or select media.", true);
-    return;
+  const content = $("#post-content").value.trim();
+  const file = $("#post-media")?.files?.[0];
+
+  if (!content && !file) {
+    return showMessage("#upload-status", "Post mein text ya media add karo.");
   }
-
-  const btn = $("#publish-post");
-  setButtonLoading(btn, true, "Publishing...");
 
   try {
     let media = null;
 
-    if (selectedFile) {
-      media = await uploadMedia(selectedFile);
+    if (file) {
+      media = await uploadMedia(file);
     }
 
     const { error } = await db.from("posts").insert({
       user_id: currentUser.id,
-      content: content || null,
+      content,
       image_url: media?.url || null,
       media_type: media?.type || "text",
       media_name: media?.name || null,
@@ -341,900 +364,910 @@ async function createPost() {
     $("#post-media").value = "";
     $("#media-preview")?.replaceChildren();
 
-    if ($("#media-preview")) $("#media-preview").hidden = true;
-
-    selectedFile = null;
-    hideProgress();
-    notify("Post published!");
+    showMessage("#upload-status", "Post published!");
     await loadFeed();
+    await loadMyPosts();
 
   } catch (error) {
     console.error(error);
-    notify(error.message, true);
-  } finally {
-    setButtonLoading(btn, false);
+    showMessage("#upload-status", error.message || "Post publish nahi hui.");
   }
 }
 
-/* ======================================
-   FOLLOWING
-====================================== */
-
-let followingIds = new Set();
-
-async function loadFollowing() {
-  const { data, error } = await db
-    .from("follows")
-    .select("following_id")
-    .eq("follower_id", currentUser.id);
-
-  if (error) throw error;
-
-  followingIds = new Set(
-    (data || []).map(x => x.following_id)
-  );
-}
-
-/* ======================================
+/* =========================================
    FEED
-====================================== */
+========================================= */
 
-async function loadFeed(userId = null, containerId = "feed") {
-  if (!currentUser || isLoadingFeed) return;
+async function loadFeed() {
+  if (!currentUser) return;
 
-  const container = $(`#${containerId}`);
-  if (!container) return;
+  const feed = $("#feed");
+  if (!feed) return;
 
-  isLoadingFeed = true;
-  container.replaceChildren(
-    makeElement("p", "empty-state", "Loading posts...")
-  );
+  feed.replaceChildren(el("p", "", "Loading posts..."));
 
-  try {
-    let query = db.from("posts")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(40);
+  let query = db
+    .from("posts")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .range(feedOffset, feedOffset + PAGE_SIZE - 1);
 
-    if (userId) query = query.eq("user_id", userId);
+  if (activeFilter === "media") {
+    query = query.in("media_type", ["image", "video"]);
+  }
 
-    const { data: posts, error } = await query;
-    if (error) throw error;
+  const { data, error } = await query;
 
-    if (!posts?.length) {
-      container.replaceChildren(
-        makeElement("p", "empty-state", "No posts yet.")
-      );
-      return;
-    }
-
-    const postIds = posts.map(p => p.id);
-    const userIds = [...new Set(posts.map(p => p.user_id))];
-
-    const [profilesRes, likesRes, commentsRes] = await Promise.all([
-      db.from("profiles")
-        .select("id,full_name,username,avatar_url")
-        .in("id", userIds),
-
-      db.from("likes")
-        .select("post_id,user_id")
-        .in("post_id", postIds),
-
-      db.from("comments")
-        .select("id,post_id,user_id,content,created_at")
-        .in("post_id", postIds)
-        .order("created_at", { ascending: true })
-    ]);
-
-    if (profilesRes.error) throw profilesRes.error;
-    if (likesRes.error) throw likesRes.error;
-    if (commentsRes.error) throw commentsRes.error;
-
-    const profiles = new Map(
-      (profilesRes.data || []).map(p => [p.id, p])
-    );
-
-    const likes = likesRes.data || [];
-    const comments = commentsRes.data || [];
-
-    let visible = posts;
-
-    if (!userId && currentFilter === "following") {
-      visible = visible.filter(p =>
-        followingIds.has(p.user_id) || p.user_id === currentUser.id
-      );
-    }
-
-    if (!userId && currentFilter === "media") {
-      visible = visible.filter(p => p.image_url);
-    }
-
-    if (feedSearch) {
-      visible = visible.filter(p =>
-        (p.content || "").toLowerCase().includes(feedSearch.toLowerCase())
-      );
-    }
-
-    container.replaceChildren();
-
-    if (!visible.length) {
-      container.append(
-        makeElement("p", "empty-state", "No matching posts.")
-      );
-      return;
-    }
-
-    visible.forEach(post => {
-      const profile = profiles.get(post.user_id);
-      const postLikes = likes.filter(x => x.post_id === post.id);
-      const postComments = comments.filter(x => x.post_id === post.id);
-
-      const liked = postLikes.some(
-        x => x.user_id === currentUser.id
-      );
-
-      const card = makeElement("article", "card post-card");
-
-      const header = makeElement("div", "post-head");
-      header.append(makeAvatar(profile));
-
-      const author = makeElement("div", "post-author");
-      author.append(makeElement(
-        "strong", "", profile?.full_name || "Member"
-      ));
-      author.append(makeElement(
-        "small", "", `${profile?.username ? "@" + profile.username + " · " : ""}${formatDate(post.created_at)}`
-      ));
-
-      header.append(author);
-
-      if (post.user_id !== currentUser.id) {
-        header.append(makeButton("Profile", () => openProfile(post.user_id)));
-      }
-
-      card.append(header);
-
-      if (post.content) {
-        card.append(makeElement("p", "post-body", post.content));
-      }
-
-      if (post.image_url) {
-        const type = post.media_type ||
-          (/\.(mp4|webm|mov)(\?|$)/i.test(post.image_url)
-            ? "video" : "image");
-
-        if (type === "video") {
-          const video = makeElement("video", "post-image");
-          video.src = post.image_url;
-          video.controls = true;
-          video.playsInline = true;
-          video.preload = "metadata";
-          card.append(video);
-        } else {
-          const img = makeElement("img", "post-image");
-          img.src = post.image_url;
-          img.alt = "Post media";
-          img.loading = "lazy";
-          card.append(img);
-        }
-      }
-
-      card.append(makeElement(
-        "div",
-        "post-stats",
-        `${postLikes.length} likes · ${postComments.length} comments`
-      ));
-
-      const actions = makeElement("div", "post-actions");
-
-      actions.append(makeButton(
-        liked ? "♥ Liked" : "♡ Like",
-        () => toggleLike(post.id, liked)
-      ));
-
-      if (post.user_id === currentUser.id) {
-        actions.append(makeButton(
-          "Delete",
-          () => deletePost(post.id)
-        ));
-      }
-
-      card.append(actions);
-
-      const commentArea = makeElement("div", "comment-area");
-
-      postComments.forEach(comment => {
-        const commentProfile = profiles.get(comment.user_id);
-        commentArea.append(makeElement(
-          "p",
-          "comment",
-          `${commentProfile?.full_name || "Member"}: ${comment.content}`
-        ));
-      });
-
-      const form = makeElement("form", "comment-form");
-      const input = makeElement("input");
-      input.placeholder = "Write a comment...";
-      input.maxLength = 1000;
-      input.required = true;
-
-      const send = makeElement("button", "", "Send");
-      send.type = "submit";
-
-      form.append(input, send);
-
-      form.addEventListener("submit", async event => {
-        event.preventDefault();
-
-        const value = input.value.trim();
-        if (!value) return;
-
-        send.disabled = true;
-
-        try {
-          const { error } = await db.from("comments").insert({
-            post_id: post.id,
-            user_id: currentUser.id,
-            content: value
-          });
-
-          if (error) throw error;
-          await loadFeed(userId, containerId);
-        } catch (error) {
-          showMessage(error.message, true);
-        } finally {
-          send.disabled = false;
-        }
-      });
-
-      commentArea.append(form);
-      card.append(commentArea);
-      container.append(card);
-    });
-
-  } catch (error) {
+  if (error) {
     console.error(error);
-    container.replaceChildren(
-      makeElement("p", "empty-state", error.message)
+    feed.replaceChildren(el("p", "", "Feed load nahi hui."));
+    return;
+  }
+
+  let rows = data || [];
+
+  if (activeFilter === "following") {
+    const { data: follows } = await db
+      .from("follows")
+      .select("following_id")
+      .eq("follower_id", currentUser.id);
+
+    const followingIds = (follows || []).map(x => x.following_id);
+    rows = rows.filter(post =>
+      post.user_id === currentUser.id ||
+      followingIds.includes(post.user_id)
     );
-  } finally {
-    isLoadingFeed = false;
+  }
+
+  posts = rows;
+  await renderPosts(rows, feed);
+}
+
+async function renderPosts(rows, container) {
+  container.replaceChildren();
+
+  if (!rows.length) {
+    container.append(el("p", "empty-state", "Abhi koi post nahi. Pehli post share karo!"));
+    return;
+  }
+
+  const authorIds = [...new Set(rows.map(p => p.user_id))];
+
+  const { data: profiles } = await db
+    .from("profiles")
+    .select("id,full_name,username,avatar_url")
+    .in("id", authorIds);
+
+  const profileMap = new Map((profiles || []).map(p => [p.id, p]));
+
+  const postIds = rows.map(p => p.id);
+
+  const { data: likes } = await db
+    .from("likes")
+    .select("post_id,user_id")
+    .in("post_id", postIds);
+
+  const { data: comments } = await db
+    .from("comments")
+    .select("post_id")
+    .in("post_id", postIds);
+
+  for (const post of rows) {
+    const author = profileMap.get(post.user_id);
+    const postLikes = (likes || []).filter(x => x.post_id === post.id);
+    const commentCount = (comments || []).filter(x => x.post_id === post.id).length;
+    const liked = postLikes.some(x => x.user_id === currentUser.id);
+
+    const card = el("article", "post-card");
+
+    const header = el("div", "post-header");
+    const avatar = el("img");
+    avatar.src = safeImage(author?.avatar_url);
+    avatar.alt = "Profile picture";
+
+    const authorInfo = el("div");
+    authorInfo.append(
+      el("strong", "", author?.full_name || "Member"),
+      el("p", "", "@" + (author?.username || "member") + " · " + formatDate(post.created_at))
+    );
+
+    header.append(avatar, authorInfo);
+    card.append(header);
+
+    if (post.content) {
+      card.append(el("p", "post-content", post.content));
+    }
+
+    if (post.image_url) {
+      if (post.media_type === "video") {
+        const video = el("video", "post-media");
+        video.src = post.image_url;
+        video.controls = true;
+        video.playsInline = true;
+        video.preload = "metadata";
+        card.append(video);
+      } else {
+        const image = el("img", "post-media");
+        image.src = post.image_url;
+        image.alt = "Post image";
+        image.loading = "lazy";
+        card.append(image);
+      }
+    }
+
+    const actions = el("div", "post-actions");
+
+    const likeButton = el("button", "", (liked ? "❤️ " : "🤍 ") + postLikes.length);
+    likeButton.addEventListener("click", () => toggleLike(post.id, liked));
+
+    const commentButton = el("button", "", "💬 " + commentCount + " Comments");
+    commentButton.addEventListener("click", () => showComments(post.id));
+
+    actions.append(likeButton, commentButton);
+
+    if (post.user_id === currentUser.id) {
+      const deleteButton = el("button", "", "Delete");
+      deleteButton.addEventListener("click", () => deletePost(post.id));
+      actions.append(deleteButton);
+    }
+
+    card.append(actions);
+    container.append(card);
   }
 }
 
-/* ======================================
+/* =========================================
    LIKES
-====================================== */
+========================================= */
 
 async function toggleLike(postId, liked) {
-  try {
-    const result = liked
-      ? await db.from("likes").delete()
-          .eq("post_id", postId)
-          .eq("user_id", currentUser.id)
-      : await db.from("likes").insert({
-          post_id: postId,
-          user_id: currentUser.id
-        });
-
-    if (result.error) throw result.error;
-    await loadFeed();
-  } catch (error) {
-    showMessage(error.message, true);
-  }
-}
-
-/* ======================================
-   DELETE POST
-====================================== */
-
-async function deletePost(postId) {
-  if (!confirm("Delete this post?")) return;
-
-  try {
-    const { error } = await db.from("posts")
+  if (liked) {
+    const { error } = await db
+      .from("likes")
       .delete()
-      .eq("id", postId)
+      .eq("post_id", postId)
       .eq("user_id", currentUser.id);
 
-    if (error) throw error;
+    if (error) return alert(error.message);
+  } else {
+    const { error } = await db.from("likes").insert({
+      post_id: postId,
+      user_id: currentUser.id
+    });
+
+    if (error && error.code !== "23505") {
+      return alert(error.message);
+    }
+  }
+
+  await loadFeed();
+  await loadMyPosts();
+}
+
+/* =========================================
+   COMMENTS
+========================================= */
+
+async function showComments(postId) {
+  const { data, error } = await db
+    .from("comments")
+    .select("*")
+    .eq("post_id", postId)
+    .order("created_at", { ascending: true });
+
+  if (error) return alert(error.message);
+
+  const container = el("div");
+  container.append(el("h3", "", "Comments"));
+
+  for (const comment of (data || [])) {
+    const { data: profile } = await db
+      .from("profiles")
+      .select("username")
+      .eq("id", comment.user_id)
+      .maybeSingle();
+
+    container.append(
+      el("p", "", "@" + (profile?.username || "member") + ": " + comment.content)
+    );
+  }
+
+  const form = el("form");
+  const input = el("input");
+  input.placeholder = "Write a comment...";
+  input.maxLength = 1000;
+  input.required = true;
+
+  const button = el("button", "primary-btn", "Comment");
+  button.type = "submit";
+
+  form.append(input, button);
+
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+
+    const content = input.value.trim();
+    if (!content) return;
+
+    const { error } = await db.from("comments").insert({
+      post_id: postId,
+      user_id: currentUser.id,
+      content
+    });
+
+    if (error) return alert(error.message);
+
+    modalClose();
+    await showComments(postId);
     await loadFeed();
-  } catch (error) {
-    showMessage(error.message, true);
-  }
+  });
+
+  container.append(form);
+
+  const old = $("#comment-modal");
+  if (old) old.remove();
+
+  const modal = el("div");
+  modal.id = "comment-modal";
+  modal.className = "card";
+  modal.style.position = "fixed";
+  modal.style.zIndex = "200";
+  modal.style.top = "10%";
+  modal.style.left = "50%";
+  modal.style.transform = "translateX(-50%)";
+  modal.style.width = "min(90%,500px)";
+  modal.style.maxHeight = "75vh";
+  modal.style.overflowY = "auto";
+
+  const close = el("button", "secondary-btn", "Close");
+  close.addEventListener("click", modalClose);
+
+  modal.append(container, close);
+  document.body.append(modal);
 }
 
-/* ======================================
+function modalClose() {
+  $("#comment-modal")?.remove();
+}
+
+/* =========================================
+   DELETE POST
+========================================= */
+
+async function deletePost(postId) {
+  if (!confirm("Kya tum yeh post delete karna chahte ho?")) return;
+
+  const { error } = await db
+    .from("posts")
+    .delete()
+    .eq("id", postId)
+    .eq("user_id", currentUser.id);
+
+  if (error) return alert(error.message);
+
+  await loadFeed();
+  await loadMyPosts();
+}
+
+/* =========================================
    PROFILE
-====================================== */
-
-async function loadMyProfile() {
-  try {
-    await refreshProfile();
-
-    const target = $("#my-profile");
-    if (target) {
-      target.replaceChildren();
-
-      const info = makeElement("div", "profile-info");
-      info.append(makeAvatar(currentProfile));
-
-      info.append(makeElement(
-        "h2", "profile-name",
-        currentProfile?.full_name || "Your name"
-      ));
-
-      info.append(makeElement(
-        "p", "profile-handle",
-        currentProfile?.username
-          ? "@" + currentProfile.username : ""
-      ));
-
-      info.append(makeElement(
-        "p", "profile-bio",
-        currentProfile?.bio || ""
-      ));
-
-      target.append(info);
-    }
-
-    if ($("#profile-name")) {
-      $("#profile-name").value = currentProfile?.full_name || "";
-    }
-
-    if ($("#profile-username")) {
-      $("#profile-username").value = currentProfile?.username || "";
-    }
-
-    if ($("#profile-bio")) {
-      $("#profile-bio").value = currentProfile?.bio || "";
-    }
-
-    await loadFeed(currentUser.id, "my-posts");
-
-  } catch (error) {
-    showMessage(error.message, true);
-  }
-}
+========================================= */
 
 async function saveProfile(event) {
   event.preventDefault();
 
-  const btn = event.submitter;
-  setButtonLoading(btn, true, "Saving...");
+  const updates = {
+    id: currentUser.id,
+    full_name: $("#edit-full-name").value.trim(),
+    username: $("#edit-username").value.trim().toLowerCase(),
+    bio: $("#edit-bio").value.trim(),
+    avatar_url: $("#edit-avatar").value.trim()
+  };
 
-  try {
-    const username = $("#profile-username").value.trim().toLowerCase();
+  if (!/^[a-z0-9_]{3,20}$/.test(updates.username)) {
+    return alert("Username 3–20 characters ka hona chahiye.");
+  }
 
-    if (username && !/^[a-z0-9_]{3,30}$/.test(username)) {
-      throw new Error("Username must be 3-30 characters.");
-    }
+  const { data, error } = await db
+    .from("profiles")
+    .upsert(updates)
+    .select()
+    .single();
 
-    let avatarUrl = currentProfile?.avatar_url || null;
-    const file = $("#avatar-file")?.files[0];
+  if (error) return alert(error.message);
 
-    if (file) {
-      const media = await uploadMedia(file);
-      avatarUrl = media.url;
-    }
+  currentProfile = data;
+  renderMyProfile();
+  alert("Profile updated!");
+}
 
-    const { error } = await db.from("profiles")
-      .update({
-        full_name: $("#profile-name").value.trim(),
-        username: username || null,
-        bio: $("#profile-bio").value.trim(),
-        avatar_url: avatarUrl
-      })
-      .eq("id", currentUser.id);
+async function loadMyPosts() {
+  if (!currentUser) return;
 
-    if (error) throw error;
+  const { data, error } = await db
+    .from("posts")
+    .select("*")
+    .eq("user_id", currentUser.id)
+    .order("created_at", { ascending: false });
 
-    await loadMyProfile();
-    showMessage("Profile updated!");
+  if (error) return console.error(error);
 
-  } catch (error) {
-    showMessage(error.message, true);
-  } finally {
-    setButtonLoading(btn, false);
-    hideProgress();
+  const container = $("#profile-posts");
+  if (container) await renderPosts(data || [], container);
+}
+
+/* =========================================
+   FOLLOW / UNFOLLOW
+========================================= */
+
+async function toggleFollow(targetId, isFollowing) {
+  if (targetId === currentUser.id) return;
+
+  if (isFollowing) {
+    const { error } = await db
+      .from("follows")
+      .delete()
+      .eq("follower_id", currentUser.id)
+      .eq("following_id", targetId);
+
+    if (error) return alert(error.message);
+  } else {
+    const { error } = await db.from("follows").insert({
+      follower_id: currentUser.id,
+      following_id: targetId
+    });
+
+    if (error && error.code !== "23505") return alert(error.message);
+  }
+
+  await loadProfileStats();
+  await openOtherProfile(targetId);
+}
+
+async function loadProfileStats() {
+  if (!currentUser) return;
+
+  const { count: postsCount } = await db
+    .from("posts")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", currentUser.id);
+
+  const { count: followersCount } = await db
+    .from("follows")
+    .select("*", { count: "exact", head: true })
+    .eq("following_id", currentUser.id);
+
+  const { count: followingCount } = await db
+    .from("follows")
+    .select("*", { count: "exact", head: true })
+    .eq("follower_id", currentUser.id);
+
+  setText("#profile-post-count", (postsCount || 0) + " Posts");
+  setText("#profile-followers", (followersCount || 0) + " Followers");
+  setText("#profile-following", (followingCount || 0) + " Following");
+}
+
+/* =========================================
+   SEARCH PEOPLE
+========================================= */
+
+async function searchPeople() {
+  const term = escapeLike($("#feed-search").value.trim());
+
+  if (term.length < 2) {
+    return showMessage("#search-results", "Kam az kam 2 characters likho.");
+  }
+
+  const { data, error } = await db
+    .from("profiles")
+    .select("id,full_name,username,avatar_url")
+    .or(`username.ilike.%${term}%,full_name.ilike.%${term}%`)
+    .limit(20);
+
+  if (error) return showMessage("#search-results", error.message);
+
+  const container = $("#search-results");
+  container.replaceChildren();
+
+  for (const person of (data || [])) {
+    const row = el("div", "new-message-person");
+    const img = el("img");
+    img.src = safeImage(person.avatar_url);
+    img.width = 42;
+    img.height = 42;
+
+    const info = el("span", "", `${person.full_name || "Member"} (@${person.username || "member"})`);
+
+    const view = el("button", "secondary-btn", "View profile");
+    view.addEventListener("click", () => openOtherProfile(person.id));
+
+    row.append(img, info, view);
+    container.append(row);
   }
 }
 
-/* ======================================
-   OTHER PROFILES AND FOLLOW
-====================================== */
+async function openOtherProfile(userId) {
+  const { data: person, error } = await db
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .single();
 
-async function openProfile(userId) {
-  if (userId === currentUser.id) {
-    switchTab("profile");
-    return;
+  if (error) return alert(error.message);
+
+  const { data: follow } = await db
+    .from("follows")
+    .select("follower_id")
+    .eq("follower_id", currentUser.id)
+    .eq("following_id", userId)
+    .maybeSingle();
+
+  const container = $("#other-profile-content");
+  container.replaceChildren();
+
+  const card = el("div", "card");
+  const img = el("img");
+  img.src = safeImage(person.avatar_url);
+  img.width = 90;
+  img.height = 90;
+
+  card.append(
+    img,
+    el("h2", "", person.full_name || "Member"),
+    el("p", "", "@" + (person.username || "member")),
+    el("p", "", person.bio || "")
+  );
+
+  if (userId !== currentUser.id) {
+    const followButton = el("button", "primary-btn", follow ? "Following" : "Follow");
+    followButton.addEventListener("click", () => toggleFollow(userId, !!follow));
+    card.append(followButton);
+
+    const messageButton = el("button", "secondary-btn", "Message");
+    messageButton.addEventListener("click", async () => {
+      switchTab("messages");
+      await startConversation(userId);
+    });
+    card.append(messageButton);
   }
+
+  container.append(card);
+
+  const { data: personPosts } = await db
+    .from("posts")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  const postContainer = el("div");
+  container.append(postContainer);
+  await renderPosts(personPosts || [], postContainer);
 
   switchTab("other-profile");
-
-  const target = $("#other-profile");
-  if (!target) return;
-
-  target.replaceChildren(
-    makeElement("p", "empty-state", "Loading profile...")
-  );
-
-  try {
-    const profile = await getProfile(userId);
-    if (!profile) throw new Error("Profile not found.");
-
-    target.replaceChildren();
-
-    const info = makeElement("div", "profile-info");
-    info.append(makeAvatar(profile));
-    info.append(makeElement("h2", "", profile.full_name || "Member"));
-    info.append(makeElement(
-      "p", "",
-      profile.username ? "@" + profile.username : ""
-    ));
-    info.append(makeElement("p", "", profile.bio || ""));
-
-    const { data: following, error } = await db.from("follows")
-      .select("follower_id")
-      .eq("follower_id", currentUser.id)
-      .eq("following_id", userId)
-      .maybeSingle();
-
-    if (error) throw error;
-
-    info.append(makeButton(
-      following ? "Following" : "Follow",
-      () => toggleFollow(userId),
-      "primary-btn"
-    ));
-
-    target.append(info);
-    await loadFeed(userId, "other-posts");
-
-  } catch (error) {
-    target.replaceChildren(
-      makeElement("p", "empty-state", error.message)
-    );
-  }
 }
 
-async function toggleFollow(userId) {
-  try {
-    const { data: existing, error } = await db.from("follows")
-      .select("follower_id")
-      .eq("follower_id", currentUser.id)
-      .eq("following_id", userId)
-      .maybeSingle();
+/* =========================================
+   NOTIFICATIONS
+========================================= */
 
-    if (error) throw error;
+async function loadNotifications() {
+  if (!currentUser) return;
 
-    const result = existing
-      ? await db.from("follows").delete()
-          .eq("follower_id", currentUser.id)
-          .eq("following_id", userId)
-      : await db.from("follows").insert({
-          follower_id: currentUser.id,
-          following_id: userId
-        });
+  const { data, error } = await db
+    .from("notifications")
+    .select("*")
+    .eq("user_id", currentUser.id)
+    .order("created_at", { ascending: false })
+    .limit(30);
 
-    if (result.error) throw result.error;
-
-    await loadFollowing();
-    await openProfile(userId);
-
-  } catch (error) {
-    showMessage(error.message, true);
-  }
-}
-
-/* ======================================
-   SEARCH
-====================================== */
-
-async function searchPeople(term) {
-  const results = $("#search-results");
-  if (!results) return;
-
-  results.replaceChildren();
-
-  const value = term.trim().replace(/[,%()]/g, " ");
-
-  if (!value) {
-    results.append(makeElement("p", "", "Enter a name or username."));
+  if (error) {
+    console.error(error);
     return;
   }
 
-  try {
-    const { data, error } = await db.from("profiles")
+  const container = $("#notifications-list");
+  if (!container) return;
+
+  container.replaceChildren();
+
+  for (const item of (data || [])) {
+    const row = el("div");
+    row.append(
+      el("p", "", item.type || "New notification"),
+      el("small", "", formatDate(item.created_at))
+    );
+    container.append(row);
+  }
+
+  if (!data?.length) {
+    container.append(el("p", "empty-state", "No notifications yet."));
+  }
+}
+
+/* =========================================
+   MESSAGING
+========================================= */
+
+async function loadConversations() {
+  if (!currentUser || !$("#conversation-items")) return;
+
+  const container = $("#conversation-items");
+  container.replaceChildren(el("p", "", "Loading chats..."));
+
+  const { data: memberships, error } = await db
+    .from("conversation_members")
+    .select("conversation_id,last_read_at")
+    .eq("user_id", currentUser.id);
+
+  if (error) {
+    console.error(error);
+    container.replaceChildren(el("p", "", "Chats load nahi huay."));
+    return;
+  }
+
+  container.replaceChildren();
+
+  for (const membership of (memberships || [])) {
+    const { data: members } = await db
+      .from("conversation_members")
+      .select("user_id")
+      .eq("conversation_id", membership.conversation_id);
+
+    const other = (members || []).find(m => m.user_id !== currentUser.id);
+    if (!other) continue;
+
+    const { data: profile } = await db
+      .from("profiles")
       .select("id,full_name,username,avatar_url")
-      .or(`full_name.ilike.%${value}%,username.ilike.%${value}%`)
-      .limit(25);
+      .eq("id", other.user_id)
+      .maybeSingle();
 
-    if (error) throw error;
+    if (!profile) continue;
 
-    const people = (data || []).filter(p => p.id !== currentUser.id);
-
-    if (!people.length) {
-      results.append(makeElement("p", "", "No members found."));
-      return;
-    }
-
-    people.forEach(person => {
-      const row = makeElement("div", "result-item");
-      row.append(makeAvatar(person));
-
-      const details = makeElement("div", "");
-      details.append(makeElement("strong", "", person.full_name || "Member"));
-      details.append(makeElement(
-        "small", "",
-        person.username ? "@" + person.username : ""
-      ));
-
-      row.append(details);
-      row.append(makeButton("View", () => openProfile(person.id)));
-      results.append(row);
-    });
-
-  } catch (error) {
-    results.append(makeElement("p", "", error.message));
-  }
-}
-
-/* ======================================
-   NOTIFICATIONS
-====================================== */
-
-async function loadNotifications() {
-  const list = $("#notifications-list");
-  if (!list) return;
-
-  list.replaceChildren(
-    makeElement("p", "", "Loading notifications...")
-  );
-
-  try {
-    const { data, error } = await db.from("notifications")
-      .select("*")
-      .eq("user_id", currentUser.id)
+    const { data: lastMessage } = await db
+      .from("messages")
+      .select("content,created_at")
+      .eq("conversation_id", membership.conversation_id)
       .order("created_at", { ascending: false })
-      .limit(40);
+      .limit(1)
+      .maybeSingle();
 
-    if (error) throw error;
+    const row = el("div", "conversation-item");
+    row.append(
+      el("strong", "", profile.full_name || profile.username || "Member"),
+      el("small", "", lastMessage?.content || "Start a conversation")
+    );
 
-    list.replaceChildren();
+    row.addEventListener("click", () => {
+      openConversation(membership.conversation_id, profile);
+    });
 
-    if (!data?.length) {
-      list.append(makeElement("p", "", "No notifications yet."));
-      return;
-    }
+    container.append(row);
+  }
 
-    for (const item of data) {
-      const row = makeElement("div", "notification-item");
-
-      const profile = item.actor_id
-        ? await getProfile(item.actor_id).catch(() => null)
-        : null;
-
-      const action = {
-        like: "liked your post",
-        comment: "commented on your post",
-        follow: "followed you"
-      }[item.type] || "interacted with you";
-
-      row.append(makeAvatar(profile));
-      row.append(makeElement(
-        "p", "",
-        `${profile?.full_name || "Someone"} ${action}`
-      ));
-
-      row.append(makeElement(
-        "small", "", formatDate(item.created_at)
-      ));
-
-      list.append(row);
-    }
-
-    const unread = data.filter(x => !x.is_read).map(x => x.id);
-
-    if (unread.length) {
-      await db.from("notifications")
-        .update({ is_read: true })
-        .in("id", unread);
-    }
-
-  } catch (error) {
-    list.replaceChildren(makeElement("p", "", error.message));
+  if (!memberships?.length) {
+    container.append(el("p", "empty-state", "No conversations yet. New Message par click karo."));
   }
 }
 
-/* ======================================
-   PROFILE PROGRESS
-====================================== */
+async function startConversation(otherUserId) {
+  if (!currentUser || otherUserId === currentUser.id) return;
 
-function updateProfileProgress() {
-  if (!currentProfile) return;
+  const { data: mine } = await db
+    .from("conversation_members")
+    .select("conversation_id")
+    .eq("user_id", currentUser.id);
 
-  const checks = [
-    !!currentProfile.full_name,
-    !!currentProfile.avatar_url,
-    !!currentProfile.bio
-  ];
+  for (const item of (mine || [])) {
+    const { data: other } = await db
+      .from("conversation_members")
+      .select("user_id")
+      .eq("conversation_id", item.conversation_id)
+      .eq("user_id", otherUserId)
+      .maybeSingle();
 
-  const percent = Math.round(
-    checks.filter(Boolean).length / checks.length * 100
+    if (other) {
+      const { data: profile } = await db
+        .from("profiles")
+        .select("id,full_name,username,avatar_url")
+        .eq("id", otherUserId)
+        .single();
+
+      return openConversation(item.conversation_id, profile);
+    }
+  }
+
+  const { data: conversation, error } = await db
+    .from("conversations")
+    .insert({})
+    .select()
+    .single();
+
+  if (error) return alert("Conversation create error: " + error.message);
+
+  const { error: firstMemberError } = await db
+    .from("conversation_members")
+    .insert({
+      conversation_id: conversation.id,
+      user_id: currentUser.id
+    });
+
+  if (firstMemberError) return alert(firstMemberError.message);
+
+  const { error: secondMemberError } = await db
+    .from("conversation_members")
+    .insert({
+      conversation_id: conversation.id,
+      user_id: otherUserId
+    });
+
+  if (secondMemberError) {
+    return alert("Doosra member add nahi hua: " + secondMemberError.message);
+  }
+
+  const { data: profile } = await db
+    .from("profiles")
+    .select("id,full_name,username,avatar_url")
+    .eq("id", otherUserId)
+    .single();
+
+  await loadConversations();
+  await openConversation(conversation.id, profile);
+}
+
+async function openConversation(conversationId, profile) {
+  activeConversationId = conversationId;
+
+  $("#chat-empty").hidden = true;
+  $("#active-chat").hidden = false;
+
+  const header = $("#chat-header");
+  header.replaceChildren(
+    el("strong", "", profile?.full_name || profile?.username || "Member")
   );
 
-  const number = $("#profile-progress-number");
-  const bar = $("#profile-progress-bar");
-  const items = $("#profile-progress-items");
+  await loadMessages();
 
-  if (number) number.textContent = percent + "%";
-  if (bar) bar.style.width = percent + "%";
+  await db
+    .from("conversation_members")
+    .update({ last_read_at: new Date().toISOString() })
+    .eq("conversation_id", conversationId)
+    .eq("user_id", currentUser.id);
 
-  if (items) {
-    items.replaceChildren();
-
-    ["Your name", "Profile photo", "Bio"].forEach((label, i) => {
-      items.append(makeElement(
-        "p", "",
-        `${checks[i] ? "✓" : "○"} ${label}`
-      ));
-    });
-  }
-}
-
-/* ======================================
-   REALTIME
-====================================== */
-
-function subscribeRealtime() {
-  if (!db || !currentUser) return;
-
-  if (realtimeChannel) {
-    db.removeChannel(realtimeChannel);
+  if (messageChannel) {
+    await db.removeChannel(messageChannel);
+    messageChannel = null;
   }
 
-  realtimeChannel = db.channel("kalim-social-updates");
-
-  realtimeChannel
-    .on("postgres_changes", {
-      event: "*",
-      schema: "public",
-      table: "posts"
-    }, () => {
-      if (currentTab === "feed") loadFeed();
-    })
-    .on("postgres_changes", {
-      event: "*",
-      schema: "public",
-      table: "likes"
-    }, () => {
-      if (currentTab === "feed") loadFeed();
-    })
-    .on("postgres_changes", {
-      event: "*",
-      schema: "public",
-      table: "comments"
-    }, () => {
-      if (currentTab === "feed") loadFeed();
-    })
+  messageChannel = db
+    .channel("messages-" + conversationId)
+    .on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "messages",
+        filter: "conversation_id=eq." + conversationId
+      },
+      () => loadMessages()
+    )
     .subscribe();
+
+  await loadConversations();
 }
 
-/* ======================================
-   THEME
-====================================== */
+async function loadMessages() {
+  if (!activeConversationId) return;
 
-function applyTheme(theme) {
+  const { data, error } = await db
+    .from("messages")
+    .select("*")
+    .eq("conversation_id", activeConversationId)
+    .order("created_at", { ascending: true })
+    .limit(100);
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  const container = $("#chat-messages");
+  container.replaceChildren();
+
+  for (const message of (data || [])) {
+    if (message.is_deleted) continue;
+
+    const bubble = el(
+      "div",
+      "message-bubble" + (message.sender_id === currentUser.id ? " mine" : ""),
+      message.content
+    );
+
+    bubble.append(
+      el("small", "message-time", formatDate(message.created_at))
+    );
+
+    container.append(bubble);
+  }
+
+  container.scrollTop = container.scrollHeight;
+}
+
+async function sendMessage(event) {
+  event.preventDefault();
+
+  if (!activeConversationId) return;
+
+  const input = $("#message-input");
+  const content = input.value.trim();
+
+  if (!content) return;
+
+  const { error } = await db.from("messages").insert({
+    conversation_id: activeConversationId,
+    sender_id: currentUser.id,
+    content
+  });
+
+  if (error) return alert("Message send error: " + error.message);
+
+  input.value = "";
+
+  await db
+    .from("conversations")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", activeConversationId);
+
+  await loadMessages();
+  await loadConversations();
+}
+
+async function searchMessagePeople() {
+  const term = escapeLike($("#new-message-search").value.trim());
+
+  if (term.length < 2) return;
+
+  const { data, error } = await db
+    .from("profiles")
+    .select("id,full_name,username,avatar_url")
+    .or(`username.ilike.%${term}%,full_name.ilike.%${term}%`)
+    .neq("id", currentUser.id)
+    .limit(15);
+
+  if (error) return console.error(error);
+
+  const container = $("#new-message-results");
+  container.replaceChildren();
+
+  for (const person of (data || [])) {
+    const button = el(
+      "button",
+      "new-message-person",
+      `${person.full_name || "Member"} (@${person.username || "member"})`
+    );
+
+    button.type = "button";
+    button.addEventListener("click", async () => {
+      $("#new-message-modal").hidden = true;
+      await startConversation(person.id);
+    });
+
+    container.append(button);
+  }
+}
+
+/* =========================================
+   THEME
+========================================= */
+
+function applyTheme() {
+  const theme = localStorage.getItem("kalim-theme") || "light";
+
   document.body.classList.toggle("dark-theme", theme === "dark");
 
-  const select = $("#theme-select");
-  if (select) select.value = theme;
+  if ($("#theme-select")) {
+    $("#theme-select").value = theme;
+  }
 }
 
-function saveTheme(theme) {
-  localStorage.setItem("kalim-theme", theme);
-  applyTheme(theme);
+function changeTheme(value) {
+  localStorage.setItem("kalim-theme", value);
+  applyTheme();
 }
 
-/* ======================================
+/* =========================================
    EVENT LISTENERS
-====================================== */
-
-function on(selector, event, callback) {
-  const el = $(selector);
-  if (el) el.addEventListener(event, callback);
-}
+========================================= */
 
 function bindEvents() {
+  $("#login-form")?.addEventListener("submit", login);
+  $("#signup-form")?.addEventListener("submit", signup);
 
-  $$("[data-auth-tab]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const mode = btn.dataset.authTab;
-
-      $$(".auth-tab").forEach(tab =>
-        tab.classList.toggle("active", tab === btn)
-      );
-
-      if ($("#login-form")) $("#login-form").hidden = mode !== "login";
-      if ($("#signup-form")) $("#signup-form").hidden = mode !== "signup";
-
-      showMessage("");
-    });
+  $("#header-login")?.addEventListener("click", () => {
+    $("#auth-section")?.removeAttribute("hidden");
   });
 
-  $$("[data-tab]").forEach(btn => {
-    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
-  });
-
-  on("#login-form", "submit", async event => {
+  $("#publish-post")?.addEventListener("click", publishPost);
+  $("#profile-form")?.addEventListener("submit", saveProfile);
+  $("#search-form")?.addEventListener("submit", event => {
     event.preventDefault();
+    searchPeople();
+  });
 
-    const btn = event.submitter;
-    setButtonLoading(btn, true, "Logging in...");
+  $("#logout-button")?.addEventListener("click", logout);
+  $("#settings-logout")?.addEventListener("click", logout);
 
-    try {
-      const { error } = await db.auth.signInWithPassword({
-        email: $("#login-email").value.trim(),
-        password: $("#login-password").value
+  document.querySelectorAll("[data-tab]").forEach(button => {
+    button.addEventListener("click", () => switchTab(button.dataset.tab));
+  });
+
+  document.querySelectorAll("[data-feed-filter]").forEach(button => {
+    button.addEventListener("click", () => {
+      activeFilter = button.dataset.feedFilter;
+      feedOffset = 0;
+
+      document.querySelectorAll("[data-feed-filter]").forEach(item => {
+        item.classList.toggle("active", item === button);
       });
-
-      if (error) throw error;
-      showMessage("Login successful!");
-
-    } catch (error) {
-      showMessage(error.message, true);
-    } finally {
-      setButtonLoading(btn, false);
-    }
-  });
-
-  on("#signup-form", "submit", async event => {
-    event.preventDefault();
-
-    const btn = event.submitter;
-    setButtonLoading(btn, true, "Creating account...");
-
-    try {
-      const { error } = await db.auth.signUp({
-        email: $("#signup-email").value.trim(),
-        password: $("#signup-password").value,
-        options: {
-          data: {
-            full_name: $("#signup-name").value.trim()
-          }
-        }
-      });
-
-      if (error) throw error;
-      showMessage("Account created! Check your email for verification.");
-
-    } catch (error) {
-      showMessage(error.message, true);
-    } finally {
-      setButtonLoading(btn, false);
-    }
-  });
-
-  async function logout() {
-    if (!db) return;
-    const { error } = await db.auth.signOut();
-    if (error) showMessage(error.message, true);
-  }
-
-  on("#logout-button", "click", logout);
-  on("#settings-logout", "click", logout);
-
-  on("#header-login", "click", () => {
-    $("#login-email")?.focus();
-  });
-
-  on("#publish-post", "click", createPost);
-
-  on("#post-media", "change", event => {
-    selectedFile = event.target.files[0] || null;
-
-    if (selectedFile && selectedFile.size > MAX_FILE_SIZE) {
-      selectedFile = null;
-      event.target.value = "";
-      previewMedia(null);
-      notify("File must be 50 MB or less.", true);
-      return;
-    }
-
-    previewMedia(selectedFile);
-  });
-
-  on("#profile-form", "submit", saveProfile);
-
-  on("#search-form", "submit", event => {
-    event.preventDefault();
-    searchPeople($("#search-input").value);
-  });
-
-  on("#global-search", "keydown", event => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      const value = event.target.value;
-      switchTab("search");
-      if ($("#search-input")) $("#search-input").value = value;
-      searchPeople(value);
-    }
-  });
-
-  $$(".feed-filter").forEach(btn => {
-    btn.addEventListener("click", () => {
-      currentFilter = btn.dataset.feedFilter;
-
-      $$(".feed-filter").forEach(x =>
-        x.classList.toggle("active", x === btn)
-      );
 
       loadFeed();
     });
   });
 
-  on("#feed-search", "input", event => {
-    feedSearch = event.target.value.trim();
+  $("#load-more-posts")?.addEventListener("click", () => {
+    feedOffset += PAGE_SIZE;
     loadFeed();
   });
 
-  on("#refresh-feed", "click", () => loadFeed());
+  $("#post-media")?.addEventListener("change", event => {
+    const file = event.target.files?.[0];
+    const preview = $("#media-preview");
 
-  on("#back-button", "click", () => switchTab("feed"));
+    preview.replaceChildren();
+    if (!file) return;
 
-  on("#theme-select", "change", event => {
-    saveTheme(event.target.value);
+    const url = URL.createObjectURL(file);
+    const media = file.type.startsWith("video/")
+      ? el("video")
+      : el("img");
+
+    media.src = url;
+
+    if (media.tagName === "VIDEO") {
+      media.controls = true;
+    }
+
+    preview.append(media);
+  });
+
+  $("#theme-select")?.addEventListener("change", event => {
+    changeTheme(event.target.value);
+  });
+
+  $("#new-message-button")?.addEventListener("click", () => {
+    $("#new-message-modal").hidden = false;
+  });
+
+  $("#close-message-modal")?.addEventListener("click", () => {
+    $("#new-message-modal").hidden = true;
+  });
+
+  $("#new-message-search")?.addEventListener("input", searchMessagePeople);
+  $("#message-form")?.addEventListener("submit", sendMessage);
+
+  $("#conversation-search")?.addEventListener("input", event => {
+    const term = event.target.value.toLowerCase();
+
+    document.querySelectorAll(".conversation-item").forEach(item => {
+      item.hidden = !item.textContent.toLowerCase().includes(term);
+    });
+  });
+
+  $("#global-search")?.addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      $("#feed-search").value = event.target.value;
+      switchTab("search");
+      searchPeople();
+    }
   });
 }
-
-/* ======================================
-   INITIALIZATION
-====================================== */
-
-async function init() {
-  const year = $("#current-year");
-  if (year) year.textContent = new Date().getFullYear();
-
-  applyTheme(localStorage.getItem("kalim-theme") || "light");
-
-  // Check Supabase library before using it.
-  if (!window.supabase || typeof window.supabase.createClient !== "function") {
-    showMessage(
-      "Supabase library missing. Check the script in index.html.",
-      true
-    );
-    console.error("Supabase JS library did not load.");
-    return;
-  }
-
-  // Initialize database BEFORE binding authentication events.
-  db = window.supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_KEY
-  );
-
-  if (!db || !db.auth) {
-    showMessage("Could not initialize Supabase.", true);
-    return;
-  }
-
-  bindEvents();
-
-  try {
-    const { data, error } = await db.auth.getSession();
-    if (error) throw error;
-
-    await updateApp(data.session);
-
-    db.auth.onAuthStateChange((_event, session) => {
-      setTimeout(() => updateApp(session), 0);
-    });
-
-  } catch (error) {
-    console.error("Initialization error:", error);
-    showMessage(error.message, true);
-  }
-}
-
-document.addEventListener("DOMContentLoaded", init);
